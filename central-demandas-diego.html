@@ -729,7 +729,7 @@
           { query: 'is:unread is:important newer_than:3d', pageSize: 10 }),
         // E-mails de pessoas-chave — lidos ou não
         window.cowork.callMcpTool('mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
-          { query: 'from:(paulo@amfi.finance OR pirola@amfi.finance OR stallin@amfi.finance OR fabiano@amfi.finance OR silvio@amfi.finance) newer_than:7d', pageSize: 15 })
+          { query: 'from:@amfi.finance newer_than:7d', pageSize: 20 })
       ]);
 
       const seen = new Set();
@@ -1578,4 +1578,7 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
       // Also clear entries with no resumo and no raw (invalid JSON parse result)
       if (a && !a.raw && !a.resumo) { delete cache[k]; changed = true; }
     });
-  
+    if (changed) localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
+  })();
+
+  // Resto

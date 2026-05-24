@@ -12,7 +12,7 @@ Lê os e-mails, arquivos do Drive e agenda do usuário, extrai tarefas com IA e 
 Use `search_threads` do Gmail com as três queries abaixo e colete os resultados:
 - `is:starred` — e-mails estrelados (alta prioridade)
 - `is:unread is:important newer_than:7d` — não lidos e importantes da última semana
-- `from:(CEO_EMAIL OR DIRETOR1_EMAIL OR ...) newer_than:7d` — e-mails de remetentes VIP **independente do status de leitura** (adapte os endereços aos contatos-chave do usuário)
+- `from:@DOMINIO_DA_EMPRESA newer_than:7d` — todos os e-mails do domínio interno da empresa, **independente do status de leitura** (substitua pelo domínio real, ex: `@amfi.finance`)
 
 Para cada thread relevante, use `get_thread` para ler o corpo completo. Foque em e-mails que contenham pedidos, prazos, ações requeridas ou decisões pendentes. Ignore newsletters, notificações automáticas e threads de CC sem ação requerida.
 

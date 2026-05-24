@@ -1,5 +1,8 @@
 # Changelog — Central de Demandas
 
+## v1.3.0 (2026-05-24)
+- **VIP por domínio** — query de e-mails importantes agora usa `from:@amfi.finance` cobrindo todo o time automaticamente, incluindo novos contratados
+
 ## v1.2.0 (2026-05-24)
 - **Notion integrado** — análise de transcrições busca Drive + Notion "Reuniões - Otallin" sempre em paralelo, combinando conteúdo das duas fontes
 
