@@ -1,5 +1,8 @@
 # Changelog — Central de Demandas
 
+## v1.4.0 (2026-05-24)
+- **Badge AmFi / Externa** — tasks geradas pela varredura de e-mails agora indicam a origem: badge verde "🏢 AmFi" para remetentes `@amfi.finance` e badge laranja "🌐 Externa" para domínios externos
+
 ## v1.3.0 (2026-05-24)
 - **VIP por domínio** — query de e-mails importantes agora usa `from:@amfi.finance` cobrindo todo o time automaticamente, incluindo novos contratados
 

@@ -722,46 +722,43 @@
     // ── 2. E-MAIL ─────────────────────────────────────────────────
     try {
       body.innerHTML = '<span class="spinner"></span> Lendo e-mails...';
-      const [starredRes, unreadRes, vipRes] = await Promise.all([
-        window.cowork.callMcpTool('mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
-          { query: 'is:starred newer_than:7d', pageSize: 10 }),
-        window.cowork.callMcpTool('mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
-          { query: 'is:unread is:important newer_than:3d', pageSize: 10 }),
-        // E-mails de pessoas-chave — lidos ou não
-        window.cowork.callMcpTool('mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
-          { query: 'from:@amfi.finance newer_than:7d', pageSize: 20 })
-      ]);
+      const allEmailsRes = await window.cowork.callMcpTool(
+        'mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
+        { query: 'newer_than:7d -category:promotions -category:social -category:updates', pageSize: 50 }
+      );
 
-      const seen = new Set();
       const threads = [];
-      const absorb = (res) => {
-        let list = res?.threads || [];
-        if (!list.length && res?.content) {
-          try { const t = res.content.find(c=>c.type==='text')?.text; if(t) list = JSON.parse(t).threads || []; } catch(e){}
-        }
-        list.forEach(t => { if (!seen.has(t.id)) { seen.add(t.id); threads.push(t); } });
-      };
-      absorb(starredRes); absorb(unreadRes); absorb(vipRes);
+      let list = allEmailsRes?.threads || [];
+      if (!list.length && allEmailsRes?.content) {
+        try { const t = allEmailsRes.content.find(c=>c.type==='text')?.text; if(t) list = JSON.parse(t).threads || []; } catch(e){}
+      }
+      list.forEach(t => threads.push(t));
 
       if (threads.length > 0) {
         const emailSummary = threads.map(t => {
           const msg = (t.messages || []).slice(-1)[0] || {};
-          return `De: ${msg.sender||'?'} | Assunto: ${msg.subject||'?'} | Data: ${msg.date ? new Date(msg.date).toLocaleString('pt-BR') : '?'}\n${msg.snippet||''}`;
+          const senderStr = msg.sender || '?';
+          const isAmFi = senderStr.toLowerCase().includes('@amfi.finance');
+          const domainTag = isAmFi ? '[AmFi]' : '[Externa]';
+          return `${domainTag} De: ${senderStr} | Assunto: ${msg.subject||'?'} | Data: ${msg.date ? new Date(msg.date).toLocaleString('pt-BR') : '?'}\n${msg.snippet||''}`;
         }).join('\n\n---\n\n');
 
         emailResult = await window.cowork.askClaude(
-          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Para cada ação, use o formato: → [ação concreta — para quem — prazo se mencionado]. Ignore e-mails informativos sem ação requerida. Se não houver ações, diga "Nenhuma ação pendente nos e-mails."\n\nE-MAILS:\n${emailSummary}`, []
+          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Cada e-mail está marcado como [AmFi] ou [Externa] dependendo do remetente. Para cada ação, use o formato: → [AmFi] ação concreta (se o e-mail for da AmFi) ou → [Externa] ação concreta (se for de fora). Inclua sempre o marcador [AmFi] ou [Externa] logo após o →. Ignore e-mails informativos sem ação requerida. Se não houver ações, diga "Nenhuma ação pendente nos e-mails."\n\nE-MAILS:\n${emailSummary}`, []
         );
 
         // Transformar ações em tasks na seção de IA
         const _emailText = typeof emailResult === 'string' ? emailResult : (emailResult?.text || '');
         const actionLines = _emailText.split('\n').filter(l => l.trim().startsWith('→'));
         if (actionLines.length > 0) {
-          const emailTasks = actionLines.map(l => ({
-            dono: 'Diego',
-            acao: l.replace(/^→\s*/, '').trim(),
-            prazo: 'esta semana'
-          }));
+          const emailTasks = actionLines.map(l => {
+            const raw = l.replace(/^→\s*/, '').trim();
+            let origem = 'externa';
+            let acao = raw;
+            if (raw.startsWith('[AmFi]')) { origem = 'amfi'; acao = raw.replace(/^\[AmFi\]\s*/, '').trim(); }
+            else if (raw.startsWith('[Externa]')) { origem = 'externa'; acao = raw.replace(/^\[Externa\]\s*/, '').trim(); }
+            return { dono: 'Diego', acao, prazo: 'esta semana', origem };
+          });
           createAITasks('email-scan', 'Varredura de E-mail', emailTasks);
         }
       } else {
@@ -1462,6 +1459,7 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
       id: `ai-${sourceTaskId}-${i}`,
       sourceTaskId, sourceTitle,
       dono: p.dono, acao: p.acao, prazo: p.prazo,
+      origem: p.origem || null,
       created: Date.now(),
       done: stored.find(t => t.id === `ai-${sourceTaskId}-${i}`)?.done || false
     }));
@@ -1510,6 +1508,11 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
       card.id = t.id;
       card.setAttribute('data-ai-task', 'true');
       card.style.position = 'relative';
+      const origemBadge = t.origem === 'amfi'
+        ? `<span class="badge" style="font-size:9px;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;">🏢 AmFi</span>`
+        : t.origem === 'externa'
+        ? `<span class="badge" style="font-size:9px;background:#fff3e0;color:#e65100;border:1px solid #ffcc80;">🌐 Externa</span>`
+        : '';
       card.innerHTML = `
         <div class="check-wrap"><div class="check-box ${t.done?'checked':''}" onclick="toggleAITask('${t.id}')"></div></div>
         <div class="card-content">
@@ -1517,6 +1520,7 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
           <div class="card-desc" style="font-size:11px;color:var(--gray-500);">🤖 Gerado pela IA · De: ${t.sourceTitle}</div>
           <div class="card-meta">
             <span class="badge b-magenta" style="font-size:9px;">🤖 IA</span>
+            ${origemBadge}
             <span class="badge b-gray">${t.prazo || 'esta semana'}</span>
           </div>
         </div>
@@ -1569,16 +1573,4 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
   })();
 
   // Clear any corrupted transcript cache entries (where raw is an object, not a string)
-  (function sanitizeTranscriptCache() {
-    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
-    let changed = false;
-    Object.keys(cache).forEach(k => {
-      const a = cache[k]?.analysis;
-      if (a && a.raw && typeof a.raw !== 'string') { delete cache[k]; changed = true; }
-      // Also clear entries with no resumo and no raw (invalid JSON parse result)
-      if (a && !a.raw && !a.resumo) { delete cache[k]; changed = true; }
-    });
-    if (changed) localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
-  })();
-
-  // Resto
+  (function san

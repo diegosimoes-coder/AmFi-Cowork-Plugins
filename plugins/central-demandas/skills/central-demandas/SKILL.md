@@ -9,12 +9,12 @@ Lê os e-mails, arquivos do Drive e agenda do usuário, extrai tarefas com IA e 
 ## Execução — siga exatamente esta ordem
 
 ### PASSO 1 — Coletar e-mails importantes (Gmail)
-Use `search_threads` do Gmail com as três queries abaixo e colete os resultados:
-- `is:starred` — e-mails estrelados (alta prioridade)
-- `is:unread is:important newer_than:7d` — não lidos e importantes da última semana
-- `from:@DOMINIO_DA_EMPRESA newer_than:7d` — todos os e-mails do domínio interno da empresa, **independente do status de leitura** (substitua pelo domínio real, ex: `@amfi.finance`)
+Use `search_threads` do Gmail com uma única query ampla:
+- `newer_than:7d -category:promotions -category:social -category:updates` — todos os e-mails dos últimos 7 dias, excluindo promoções, redes sociais e notificações automáticas. Sem filtro por lido/não lido ou por remetente.
 
-Para cada thread relevante, use `get_thread` para ler o corpo completo. Foque em e-mails que contenham pedidos, prazos, ações requeridas ou decisões pendentes. Ignore newsletters, notificações automáticas e threads de CC sem ação requerida.
+Ao montar o resumo de cada thread, prefixe com `[AmFi]` se o remetente for `@amfi.finance`, ou `[Externa]` caso contrário. Instrua o modelo a manter esse prefixo em cada linha `→` gerada. Ao criar as tasks, extraia o prefixo para o campo `origem` (`'amfi'` ou `'externa'`). O artefato renderiza badge verde "🏢 AmFi" para tasks de origem `amfi` e badge laranja "🌐 Externa" para origem `externa`.
+
+Use `pageSize: 50` para capturar o máximo de threads. Para cada thread relevante, use `get_thread` para ler o corpo completo. Foque em e-mails que contenham pedidos, prazos, ações requeridas ou decisões pendentes.
 
 ### PASSO 2 — Coletar arquivos do Drive
 Use `search_files` do Google Drive para buscar:
