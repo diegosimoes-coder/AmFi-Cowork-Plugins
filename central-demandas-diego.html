@@ -240,6 +240,22 @@
   <div class="section-title"><span class="dot dot-yellow"></span> Esta Semana</div>
   <div class="task-list" id="list-semana">
 
+    <div class="card blue" id="task-paulo-plataforma"
+         data-tipo="email"
+         data-keywords="central demandas plataforma cowork ferramenta ai paulo">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-paulo-plataforma')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Responder Paulo — e-mail sobre a Central de Demandas</div>
+        <div class="card-desc">Paulo perguntou sobre a nova plataforma. Responder explicando todas as funcionalidades, como usar e que ainda está em validação.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Comunicação</span>
+          <span class="badge b-blue">Esta semana</span>
+          <span class="cal-badge loading-cal" id="cal-task-paulo-plataforma">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">26/05</div>
+    </div>
+
     <div class="card blue" id="task-pirola-stallin"
          data-keywords="cargo engenheiro aumento função dri otallin formalizar"
          data-attendees="pirola stallin">
@@ -501,9 +517,19 @@
 </div>
 
 <script>
-  const TOTAL_TASKS = 12;
+  const TOTAL_TASKS = 13;
   const STORAGE_KEY = 'amfi-demandas-done-v1';
   const MANUAL_UNCHECKED_KEY = 'amfi-manual-unchecked-v1';
+  const EMAIL_RESOLUTION_KEY = 'amfi-email-resolutions-v1';
+
+  // Helper global — normaliza resposta do askClaude
+  function extractText(val) {
+    if (typeof val === 'string') return val;
+    if (val && typeof val.text === 'string') return val.text;
+    if (val?.content && typeof val.content === 'string') return val.content;
+    if (Array.isArray(val?.content)) return val.content.find(c=>c.type==='text')?.text || JSON.stringify(val);
+    return JSON.stringify(val);
+  }
 
   // ── PERSIST ───────────────────────────────────────────────────
   function loadDone() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch(e) { return {}; } }
@@ -735,16 +761,18 @@
       list.forEach(t => threads.push(t));
 
       if (threads.length > 0) {
+        // Inclui [ASSUNTO:...] em cada entrada para rastrear de qual e-mail veio cada ação
         const emailSummary = threads.map(t => {
           const msg = (t.messages || []).slice(-1)[0] || {};
           const senderStr = msg.sender || '?';
           const isAmFi = senderStr.toLowerCase().includes('@amfi.finance');
           const domainTag = isAmFi ? '[AmFi]' : '[Externa]';
-          return `${domainTag} De: ${senderStr} | Assunto: ${msg.subject||'?'} | Data: ${msg.date ? new Date(msg.date).toLocaleString('pt-BR') : '?'}\n${msg.snippet||''}`;
+          const subject = msg.subject || '?';
+          return `${domainTag}[ASSUNTO: ${subject}] De: ${senderStr} | Data: ${msg.date ? new Date(msg.date).toLocaleString('pt-BR') : '?'}\n${msg.snippet||''}`;
         }).join('\n\n---\n\n');
 
         emailResult = await window.cowork.askClaude(
-          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Cada e-mail está marcado como [AmFi] ou [Externa] dependendo do remetente. Para cada ação, use o formato: → [AmFi] ação concreta (se o e-mail for da AmFi) ou → [Externa] ação concreta (se for de fora). Inclua sempre o marcador [AmFi] ou [Externa] logo após o →. Ignore e-mails informativos sem ação requerida. Se não houver ações, diga "Nenhuma ação pendente nos e-mails."\n\nE-MAILS:\n${emailSummary}`, []
+          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Cada e-mail tem tags [AmFi] ou [Externa] e [ASSUNTO: ...]. Para cada ação use o formato: → [AmFi][ASSUNTO: assunto original] ação concreta  ou  → [Externa][ASSUNTO: assunto original] ação concreta. Preserve SEMPRE o [ASSUNTO: ...] exatamente como aparece no e-mail de origem. Ignore informativos sem ação. Se não houver ações, diga "Nenhuma ação pendente."\n\nE-MAILS:\n${emailSummary}`, []
         );
 
         // Transformar ações em tasks na seção de IA
@@ -752,40 +780,84 @@
         const actionLines = _emailText.split('\n').filter(l => l.trim().startsWith('→'));
         if (actionLines.length > 0) {
           const emailTasks = actionLines.map(l => {
-            const raw = l.replace(/^→\s*/, '').trim();
+            let raw = l.replace(/^→\s*/, '').trim();
             let origem = 'externa';
-            let acao = raw;
-            if (raw.startsWith('[AmFi]')) { origem = 'amfi'; acao = raw.replace(/^\[AmFi\]\s*/, '').trim(); }
-            else if (raw.startsWith('[Externa]')) { origem = 'externa'; acao = raw.replace(/^\[Externa\]\s*/, '').trim(); }
-            return { dono: 'Diego', acao, prazo: 'esta semana', origem };
+            let emailSubject = null;
+            // Extrai origem
+            if (raw.startsWith('[AmFi]')) { origem = 'amfi'; raw = raw.replace(/^\[AmFi\]\s*/, '').trim(); }
+            else if (raw.startsWith('[Externa]')) { origem = 'externa'; raw = raw.replace(/^\[Externa\]\s*/, '').trim(); }
+            // Extrai assunto
+            const subjectMatch = raw.match(/^\[ASSUNTO:\s*([^\]]*)\]/);
+            if (subjectMatch) { emailSubject = subjectMatch[1].trim(); raw = raw.replace(/^\[ASSUNTO:[^\]]*\]\s*/, '').trim(); }
+            return { dono: 'Diego', acao: raw, prazo: 'esta semana', origem, emailSubject };
           });
           createAITasks('email-scan', 'Varredura de E-mail', emailTasks);
         }
       } else {
-        emailResult = 'Nenhum e-mail importante não lido nos últimos dias.';
+        emailResult = 'Nenhum e-mail encontrado nos últimos dias.';
       }
     } catch(err) { emailResult = '⚠️ ' + (err.message || String(err)); }
 
+    // ── 3. NOTION ─────────────────────────────────────────────────
+    let notionResult = '';
+    try {
+      body.innerHTML = '<span class="spinner"></span> Lendo Notion...';
+      const notionRes = await window.cowork.callMcpTool(
+        'mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-search',
+        { query: 'próximos passos ação pendente Diego', data_source_url: 'collection://361061f2-b2ad-80a2-9d82-000b44dcd74a', page_size: 5, max_highlight_length: 600 }
+      );
+      let notionPages = notionRes?.results || notionRes?.pages || [];
+      if (!notionPages.length && notionRes?.content) {
+        try { const t = notionRes.content.find(c=>c.type==='text')?.text; if(t) { const p = JSON.parse(t); notionPages = p.results || p.pages || []; } } catch(e){}
+      }
+      if (notionPages.length > 0) {
+        // Lê conteúdo das páginas mais relevantes
+        const notionContent = (await Promise.all(notionPages.slice(0,3).map(async pg => {
+          try {
+            const pageUrl = pg.url || pg.id;
+            const full = await window.cowork.callMcpTool(
+              'mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-fetch',
+              { url: pageUrl }
+            );
+            const text = full?.content || full?.text || (Array.isArray(full?.content) ? full.content.map(c=>c.text||'').join('\n') : '');
+            return `[${pg.title || pg.id}]\n${text.substring(0, 800)}`;
+          } catch(_) { return `[${pg.title||'página'}]\n${pg.highlight || pg.snippet || ''}`; }
+        }))).join('\n\n---\n\n');
+
+        notionResult = await window.cowork.askClaude(
+          `Você é o assistente do Diego Simoes. Analise estas anotações do Notion (Reuniões - Otallin) e extraia APENAS ações concretas pendentes para o Diego. Cada ação deve começar com →. Se não houver nada acionável, diga "Nenhuma nova demanda no Notion."\n\n${notionContent}`, []
+        );
+
+        const notionText = extractText(notionResult);
+        const notionActionLines = notionText.split('\n').filter(l => l.trim().startsWith('→'));
+        if (notionActionLines.length > 0) {
+          const notionTasks = notionActionLines.map(l => ({
+            dono: 'Diego', acao: l.replace(/^→\s*/, '').trim(), prazo: 'esta semana', origem: null
+          }));
+          createAITasks('notion-scan', 'Varredura do Notion', notionTasks);
+        }
+      } else {
+        notionResult = 'Nenhuma atualização recente encontrada no Notion.';
+      }
+    } catch(err) { notionResult = '⚠️ ' + (err.message || String(err)); }
+
     // ── RENDER ────────────────────────────────────────────────────
-    // askClaude pode retornar string ou objeto {text: ...}
-    function extractText(val) {
-      if (typeof val === 'string') return val;
-      if (val?.text) return val.text;
-      if (val?.content && typeof val.content === 'string') return val.content;
-      if (Array.isArray(val?.content)) return val.content.find(c=>c.type==='text')?.text || JSON.stringify(val);
-      return JSON.stringify(val);
-    }
     const driveText = extractText(driveResult);
     const emailText = extractText(emailResult);
+    const notionText = extractText(notionResult);
 
     body.innerHTML = `
       <div style="margin-bottom:14px;">
         <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--magenta);margin-bottom:7px;">📂 Drive</div>
         <div style="font-size:13px;color:var(--gray-700);line-height:1.65;white-space:pre-wrap;">${driveText}</div>
       </div>
-      <div style="border-top:1px solid var(--gray-300);padding-top:14px;">
+      <div style="border-top:1px solid var(--gray-300);padding-top:14px;margin-bottom:14px;">
         <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--magenta);margin-bottom:7px;">📧 E-mail</div>
         <div style="font-size:13px;color:var(--gray-700);line-height:1.65;white-space:pre-wrap;">${emailText}</div>
+      </div>
+      <div style="border-top:1px solid var(--gray-300);padding-top:14px;">
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--magenta);margin-bottom:7px;">📓 Notion</div>
+        <div style="font-size:13px;color:var(--gray-700);line-height:1.65;white-space:pre-wrap;">${notionText}</div>
       </div>`;
 
     btn.disabled = false; btn.innerHTML = '🔍 Fazer Varredura';
@@ -795,6 +867,25 @@
 
   // ── BRIEFING DATA ─────────────────────────────────────────────
   const BRIEFINGS = {
+    'task-paulo-plataforma': {
+      tag: 'Esta Semana · Comunicação',
+      title: 'Responder Paulo — e-mail sobre a Central de Demandas',
+      emailSearch: 'subject:"Email e Whatsapp virando to do" newer_than:30d',
+      emailResolvePrompt: 'O Diego tinha que responder um e-mail do Paulo David sobre uma nova plataforma (Central de Demandas). Nos e-mails abaixo, identifique: (1) o e-mail original do Paulo perguntando sobre a ferramenta e (2) a resposta que o Diego enviou. Resuma em 3-4 linhas o que foi comunicado nessa troca. Se não encontrar a resposta do Diego, diga que a tarefa foi marcada como concluída mas a resposta não apareceu nos últimos e-mails encontrados.',
+      objetivo: 'Responder o e-mail do Paulo David explicando em detalhes o que é a Central de Demandas, como funciona, como ele e o time podem usar, e deixar claro que a ferramenta ainda está em fase de validação.',
+      pontos: [
+        'Contextualizar: a plataforma foi criada na sexta-feira e ainda está sendo validada — pedir que testem e reportem o que não funcionar.',
+        'Explicar a extração automática de tarefas: a IA lê e-mails, arquivos do Drive e transcrições de reuniões e monta a lista de tarefas por urgência.',
+        'Destacar o cruzamento com a agenda: quando há reunião marcada sobre uma task, ela aparece automaticamente como "Agendada".',
+        'Mencionar o auto-complete pós-call: quando a reunião acontece, a IA analisa a transcrição, traz um briefing do que foi discutido e cria novas tasks de próximos passos.',
+        'Explicar os badges AmFi/Externa: tasks geradas por e-mails internos aparecem com 🏢 AmFi; externas com 🌐 Externa.',
+        'Falar do botão "Fazer Varredura": permite re-escanear Drive e e-mails manualmente a qualquer momento.',
+        'Mencionar que NÃO está integrado com WhatsApp ainda.',
+        'Informar que o plugin está no GitHub e como pegar a versão mais atualizada: substituir o link antigo pelo novo do repositório.'
+      ],
+      contexto: 'Diego criou a Central de Demandas na sexta-feira como parte do seu trabalho como DRI de AI na AmFi. Paulo David é o CEO e se interessou pela ferramenta. O e-mail dele foi o gatilho para escrever uma resposta explicativa completa.',
+      sucesso: 'Paulo e o time entendem exatamente o que a ferramenta faz, como instalar/usar, e têm clareza sobre o que ainda está em desenvolvimento.'
+    },
     'task-fabiano': {
       tag: 'Urgente · Hoje 22/05',
       title: 'Conversar com Fabiano sobre transição',
@@ -1117,7 +1208,7 @@
         <div class="briefing-success">✅ ${b.sucesso}</div>
       </div>
       <div class="briefing-section" id="transcript-section-${taskId}">
-        <div class="briefing-section-title">O que aconteceu na reunião</div>
+        <div class="briefing-section-title" id="encerramentoTitle-${taskId}">Encerramento</div>
         <div id="transcript-result-${taskId}"></div>
       </div>`;
     setTimeout(() => initTranscriptSection(taskId), 50);
@@ -1157,7 +1248,7 @@
         <div class="briefing-success">✅ ${b.sucesso}</div>
       </div>
       <div class="briefing-section" id="transcript-section-${taskId}">
-        <div class="briefing-section-title">O que aconteceu na reunião</div>
+        <div class="briefing-section-title" id="encerramentoTitle-${taskId}">Encerramento</div>
         <div id="transcript-result-${taskId}"></div>
       </div>
     `;
@@ -1412,165 +1503,20 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
       </div>`;
   }
 
-  // Called on briefing open — decides what to show in transcript section
+  // Called on briefing open — decides what to show in encerramento section
   function initTranscriptSection(taskId) {
     const resultEl = document.getElementById('transcript-result-' + taskId);
     if (!resultEl) return;
+
+    const card = document.getElementById(taskId);
+    const tipo = card?.getAttribute('data-tipo') || 'reuniao';
     const badge = document.getElementById('cal-' + taskId);
     const isRealizado = badge?.classList.contains('done-cal');
     const isAgendado  = badge?.classList.contains('scheduled');
+    const isDone = !!(loadDone()[taskId] || card?.querySelector('.check-box.checked'));
+    const titleEl = document.getElementById('encerramentoTitle-' + taskId);
 
-    if (isAgendado) {
-      resultEl.innerHTML = `<div class="briefing-context">Reunião agendada: <strong>${badge.textContent}</strong>.<br>A análise de transcrição estará disponível após a reunião acontecer.</div>`;
-      return;
-    }
-    if (!isRealizado) {
-      resultEl.innerHTML = `
-        <div style="font-size:12px;color:var(--gray-500);line-height:1.6;">Nenhuma reunião detectada no calendário para esta task.
-          <br>Se a reunião já aconteceu sem evento no Calendar:</div>
-        <button class="btn-ghost" style="font-size:12px;padding:7px 13px;margin-top:10px;" onclick="markAsRealizado('${taskId}')">✅ Marcar reunião como realizada e buscar transcrição</button>`;
-      return;
-    }
-    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
-    const eventKey = badge.getAttribute('data-event-key') || taskId;
-    if (cache[taskId]?.eventKey === eventKey) {
-      renderAnalysis(taskId, resultEl);
-    } else {
-      resultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Buscando e analisando transcrição no Drive...</div>';
-      analyzeAndCache(taskId, eventKey);
-    }
-  }
-
-  function clearAndReanalyze(taskId) {
-    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
-    delete cache[taskId];
-    localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
-    const resultEl = document.getElementById('transcript-result-' + taskId);
-    if (resultEl) resultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Reanalisando...</div>';
-    const badge = document.getElementById('cal-' + taskId);
-    analyzeAndCache(taskId, badge?.getAttribute('data-event-key') || taskId);
-  }
-
-  // ── AI-GENERATED TASKS ────────────────────────────────────────
-  function createAITasks(sourceTaskId, sourceTitle, proximos_passos) {
-    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
-    const other = stored.filter(t => t.sourceTaskId !== sourceTaskId);
-    const newTasks = proximos_passos.map((p, i) => ({
-      id: `ai-${sourceTaskId}-${i}`,
-      sourceTaskId, sourceTitle,
-      dono: p.dono, acao: p.acao, prazo: p.prazo,
-      origem: p.origem || null,
-      created: Date.now(),
-      done: stored.find(t => t.id === `ai-${sourceTaskId}-${i}`)?.done || false
-    }));
-    localStorage.setItem(AI_TASKS_KEY, JSON.stringify([...other, ...newTasks]));
-    renderAITasks();
-    updateStats();
-  }
-
-  function toggleAITask(id) {
-    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
-    const t = stored.find(t => t.id === id);
-    if (t) t.done = !t.done;
-    localStorage.setItem(AI_TASKS_KEY, JSON.stringify(stored));
-    renderAITasks();
-    updateStats();
-  }
-
-  function dismissAITask(id) {
-    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
-    localStorage.setItem(AI_TASKS_KEY, JSON.stringify(stored.filter(t => t.id !== id)));
-    renderAITasks();
-    updateStats();
-  }
-
-  function renderAITasks() {
-    // Remove tasks de IA injetadas anteriormente para evitar duplicatas
-    document.querySelectorAll('[data-ai-task="true"]').forEach(el => el.remove());
-
-    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
-    if (!stored.length) { updateStats(countDone()); return; }
-
-    // Mapeia prazo para seção existente
-    const getListId = (prazo) => {
-      if (!prazo) return 'list-semana';
-      const p = prazo.toLowerCase();
-      if (p.includes('hoje')) return 'list-urgente';
-      if (p.includes('semana')) return 'list-semana';
-      return 'list-proximas'; // próxima semana, mês, etc.
-    };
-
-    stored.forEach(t => {
-      const listEl = document.getElementById(getListId(t.prazo));
-      if (!listEl) return;
-      const card = document.createElement('div');
-      card.className = 'card blue' + (t.done ? ' done' : '');
-      card.id = t.id;
-      card.setAttribute('data-ai-task', 'true');
-      card.style.position = 'relative';
-      const origemBadge = t.origem === 'amfi'
-        ? `<span class="badge" style="font-size:9px;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;">🏢 AmFi</span>`
-        : t.origem === 'externa'
-        ? `<span class="badge" style="font-size:9px;background:#fff3e0;color:#e65100;border:1px solid #ffcc80;">🌐 Externa</span>`
-        : '';
-      card.innerHTML = `
-        <div class="check-wrap"><div class="check-box ${t.done?'checked':''}" onclick="toggleAITask('${t.id}')"></div></div>
-        <div class="card-content">
-          <div class="card-name" onclick="openBriefing('${t.id}')" title="Clique para ver o briefing">${t.acao} <span style="font-size:11px;opacity:0.45;">📋</span></div>
-          <div class="card-desc" style="font-size:11px;color:var(--gray-500);">🤖 Gerado pela IA · De: ${t.sourceTitle}</div>
-          <div class="card-meta">
-            <span class="badge b-magenta" style="font-size:9px;">🤖 IA</span>
-            ${origemBadge}
-            <span class="badge b-gray">${t.prazo || 'esta semana'}</span>
-          </div>
-        </div>
-        <button onclick="dismissAITask('${t.id}')" title="Dispensar" style="position:absolute;top:8px;right:8px;background:none;border:none;cursor:pointer;font-size:14px;color:var(--gray-500);line-height:1;opacity:0.5;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.5">✕</button>`;
-      listEl.appendChild(card);
-    });
-
-    updateStats(countDone());
-  }
-
-  function countDone() {
-    let n = 0;
-    document.querySelectorAll('.card[id]').forEach(card => {
-      if (loadDone()[card.id] || card.querySelector('.check-box.checked')) n++;
-    });
-    return n;
-  }
-
-  function closeBriefing() {
-    document.getElementById('drawerOverlay').classList.remove('open');
-    document.getElementById('briefingDrawer').classList.remove('open');
-    document.body.style.overflow = '';
-  }
-
-  // Wire up card-name clicks to open briefing
-  document.querySelectorAll('.card[id]').forEach(card => {
-    const nameEl = card.querySelector('.card-name');
-    if (nameEl && BRIEFINGS[card.id]) {
-      nameEl.addEventListener('click', () => openBriefing(card.id));
-      // Add visual hint
-      nameEl.title = 'Clique para ver o briefing detalhado';
-      // Add small icon
-      const icon = document.createElement('span');
-      icon.textContent = ' 📋';
-      icon.style.cssText = 'font-size:11px;opacity:0.45;';
-      nameEl.appendChild(icon);
-    }
-  });
-
-  // ── INIT ──────────────────────────────────────────────────────
-  applyState(loadDone());
-
-  // Pre-mark task-rubia as realizado (meeting happened 22/05 às 11h, no Calendar event)
-  (function seedManualRubia() {
-    const stored = JSON.parse(localStorage.getItem(MANUAL_REALIZADO_KEY) || '{}');
-    if (!stored['task-rubia']) {
-      stored['task-rubia'] = { dateStr: 'sex., 22/05 11:00', eventKey: 'manual-rubia-20260522' };
-      localStorage.setItem(MANUAL_REALIZADO_KEY, JSON.stringify(stored));
-    }
-  })();
-
-  // Clear any corrupted transcript cache entries (where raw is an object, not a string)
-  (function san
+    // ── TIPO EMAIL ────────────────────────────────────────────────
+    if (tipo === 'email') {
+      if (isDone) {
+        if

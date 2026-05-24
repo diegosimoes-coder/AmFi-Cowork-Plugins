@@ -1,7 +1,7 @@
 {
   "id": "central-demandas",
   "name": "Central de Demandas",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Transforma seus e-mails, reuniões e arquivos do Drive em uma lista de tarefas organizada por urgência, com briefings detalhados e análise automática de transcrições.",
   "author": "AmFi Finance",
   "requiredConnectors": [

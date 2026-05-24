@@ -1,5 +1,11 @@
 # Changelog — Central de Demandas
 
+## v1.5.0 (2026-05-24)
+- **Assunto do e-mail salvo nas AI tasks** — cada task gerada por e-mail guarda o assunto original para busca precisa ao verificar encerramento
+- **Resolução de e-mail usa subject exato** — ao abrir drawer de task concluída, busca `subject:"..."` no Gmail em vez de keywords genéricas
+- **Varredura inclui Notion** — botão "Fazer Varredura" agora escaneia Drive + E-mail + Notion (Reuniões - Otallin) e exibe resultados em três seções
+- **Encerramento inteligente** — seção do drawer detecta automaticamente se a task foi encerrada via e-mail, reunião ou manualmente; título e conteúdo se adaptam ao contexto
+
 ## v1.4.0 (2026-05-24)
 - **Badge AmFi / Externa** — tasks geradas pela varredura de e-mails agora indicam a origem: badge verde "🏢 AmFi" para remetentes `@amfi.finance` e badge laranja "🌐 Externa" para domínios externos
 
