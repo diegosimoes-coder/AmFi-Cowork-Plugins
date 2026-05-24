@@ -9,10 +9,10 @@ Lê os e-mails, arquivos do Drive e agenda do usuário, extrai tarefas com IA e 
 ## Execução — siga exatamente esta ordem
 
 ### PASSO 1 — Coletar e-mails importantes (Gmail)
-Use `search_threads` do Gmail com as queries abaixo e colete os resultados:
+Use `search_threads` do Gmail com as três queries abaixo e colete os resultados:
 - `is:starred` — e-mails estrelados (alta prioridade)
 - `is:unread is:important newer_than:7d` — não lidos e importantes da última semana
-- `is:unread newer_than:3d` — não lidos dos últimos 3 dias
+- `from:(CEO_EMAIL OR DIRETOR1_EMAIL OR ...) newer_than:7d` — e-mails de remetentes VIP **independente do status de leitura** (adapte os endereços aos contatos-chave do usuário)
 
 Para cada thread relevante, use `get_thread` para ler o corpo completo. Foque em e-mails que contenham pedidos, prazos, ações requeridas ou decisões pendentes. Ignore newsletters, notificações automáticas e threads de CC sem ação requerida.
 
@@ -21,7 +21,7 @@ Use `search_files` do Google Drive para buscar:
 - Arquivos modificados nas últimas 48h: `modifiedTime > '{ontem}' and mimeType != 'application/vnd.google-apps.folder'`
 - Transcrições ou anotações de reuniões: `fullText contains 'transcrição' or fullText contains 'anotações' or fullText contains 'reunião'` com `modifiedTime > '{7 dias atrás}'`
 
-Para arquivos relevantes, use `read_file_content` para extrair o conteúdo.
+Para arquivos relevantes, use `read_file_content` para extrair o conteúdo. Preste atenção especial a linhas que começam com `→` ou `•` — elas costumam indicar próximos passos e geram tasks automaticamente.
 
 ### PASSO 3 — Coletar agenda (Google Calendar)
 Use `list_events` com janela de -3 dias a +14 dias para identificar:
@@ -39,14 +39,16 @@ Com todo o conteúdo coletado, analise e extraia tarefas seguindo estas regras:
 
 **Para cada tarefa extraída, defina:**
 - `id`: slug único (ex: `task-email-paulo-20260524`)
-- `título`: ação concreta em uma linha (ex: "Responder Paulo sobre proposta Bradesco")
-- `descrição`: contexto em 1-2 linhas
-- `urgência`: uma das categorias acima
+- `titulo`: ação concreta em uma linha (ex: "Responder Paulo sobre proposta Bradesco")
+- `acao`: mesmo que `titulo` (campo usado pelo artefato para renderização)
+- `descricao`: contexto em 1-2 linhas
+- `urgencia`: uma das categorias acima
 - `fonte`: "email", "drive" ou "reunião"
-- `remetente/contexto`: quem enviou ou de onde veio
-- `prazo`: data se explícita, senão "esta semana" ou "a definir"
+- `sourceTitle`: remetente ou nome do arquivo de origem
+- `prazo`: "hoje", "esta semana", "próximas semanas" ou data explícita
 - `keywords`: 3-5 palavras para cruzar com o Calendar
-- `briefing`: objeto com campos `objetivo`, `pontos` (array), `contexto`, `sucesso`
+
+**Fusão de tasks relacionadas:** se duas ou mais tasks vêm da mesma reunião ou call, junte-as num único card com descrição combinada e pontos-chave de ambas. Isso evita fragmentação desnecessária.
 
 ### PASSO 5 — Gerar o artefato ao vivo
 Use `mcp__cowork__create_artifact` com o HTML completo gerado a partir das tarefas extraídas.
@@ -61,18 +63,31 @@ O HTML deve seguir exatamente o design system da AmFi:
 O artefato deve incluir:
 1. **Stats bar**: contadores de Urgente/Hoje, Esta Semana, Concluídas, Total
 2. **Barra de progresso** geral
-3. **Status de agenda**: cruza tasks com Calendar via `mcp__2bcf1cbe-23ad-4d23-8641-4b2f88e18a8b__list_events`
-4. **Seções de tasks** por urgência, cada card com checkbox, nome clicável, descrição, badges e data
-5. **Drawer de briefing**: abre ao clicar no nome da task, mostra objetivo, pontos-chave, contexto e critério de sucesso
-6. **Botão "Verificar Drive"**: busca novos arquivos e analisa com `window.cowork.askClaude`
-7. **Análise de transcrições**: para tasks com reunião "Realizado" no Calendar, busca transcrição no Drive e analisa automaticamente
+3. **Status de agenda**: cruza tasks com Calendar via `window.cowork.callMcpTool('list_events', ...)`
+4. **Auto-complete do Calendar**: tasks marcadas como "Realizado" na agenda são automaticamente concluídas; respeita marcações manuais de desmarcação
+5. **Seções de tasks** por urgência (`list-urgente`, `list-semana`, `list-proximas`), cada card com checkbox, nome clicável, descrição, badges e data
+6. **Tasks de IA injetadas nas seções certas** com badge `🤖 IA` e atributo `data-ai-task="true"` para idempotência
+7. **Drawer de briefing**: abre ao clicar no nome de QUALQUER task (incluindo tasks de IA); para tasks de IA sem briefing, gera via `window.cowork.askClaude()` e cacheia no `localStorage`
+8. **Botão "Fazer Varredura"**: escaneia Drive + Gmail em paralelo; extrai linhas com `→` como novas tasks de IA; renderiza seções DRIVE e E-MAIL com resumo
+9. **Análise de transcrições**: para tasks com reunião "Realizado" no Calendar, busca transcrição no Drive e analisa automaticamente
 
 O artefato usa `window.cowork.callMcpTool()` para todas as chamadas de API e `window.cowork.askClaude()` para análises de IA. Estado de conclusão dos cards é persistido em `localStorage`.
 
+**Helper obrigatório — normalize resposta do askClaude:**
+```javascript
+function extractText(val) {
+  if (typeof val === 'string') return val;
+  if (val && typeof val.text === 'string') return val.text;
+  return JSON.stringify(val);
+}
+```
+Use `extractText()` sempre que processar a resposta de `window.cowork.askClaude()`.
+
 **MCP tools que o artefato vai chamar:**
-- `mcp__2bcf1cbe-23ad-4d23-8641-4b2f88e18a8b__list_events` (Calendar)
-- `mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__search_files` (Drive)
-- `mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__read_file_content` (Drive)
+- `list_events` (Calendar)
+- `search_files` (Drive)
+- `read_file_content` (Drive)
+- `search_threads` (Gmail) — usado no botão Fazer Varredura
 
 ### PASSO 6 — Confirmar e orientar
 Após criar o artefato, informe o usuário:
@@ -86,3 +101,4 @@ Após criar o artefato, informe o usuário:
 - O artefato gerado deve usar os IDs reais dos MCP tools disponíveis na sessão do usuário
 - A identidade visual (cores, fonte, layout) deve seguir sempre o padrão AmFi descrito acima
 - Se já existe um artefato `central-demandas` para o usuário, use `mcp__cowork__update_artifact` para atualizar em vez de criar um novo
+- Tasks que representam "construir uma skill" devem ter `data-no-autocomplete="true"` para não serem auto-concluídas só porque houve uma reunião de alinhamento sobre o tema

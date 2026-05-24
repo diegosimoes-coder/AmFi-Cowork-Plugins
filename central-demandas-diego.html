@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Central Demandas Diego",
+  "schemaVersion": 1,
+  "description": "Painel de demandas do Diego com todas as tasks extraídas das calls de alinhamento, prazos, prioridades e botão para verificar novas demandas no Drive em tempo real.",
+  "mcpTools": [
+    "mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__search_files",
+    "mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__read_file_content",
+    "mcp__2bcf1cbe-23ad-4d23-8641-4b2f88e18a8b__list_events",
+    "mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads"
+  ],
+  "mcpServerNames": [
+    "Google Drive",
+    "Google Drive",
+    "Google Calendar",
+    "Gmail"
+  ]
+}
+</script>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Central de Demandas — Diego</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --magenta: #E91E8C;
+      --magenta-light: #fce4f3;
+      --dark: #111827;
+      --gray-700: #374151;
+      --gray-500: #6b7280;
+      --gray-300: #d1d5db;
+      --gray-100: #f3f4f6;
+      --white: #ffffff;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --purple: #8b5cf6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f6fa; color: var(--dark); min-height: 100vh; }
+
+    .header { background: var(--white); border-bottom: 3px solid var(--magenta); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 17px; font-weight: 700; }
+    .header p { font-size: 11px; color: var(--gray-500); margin-top: 3px; }
+    .header-btns { display: flex; gap: 8px; align-items: center; }
+    .btn { background: var(--magenta); color: white; border: none; padding: 9px 16px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+    .btn:hover { opacity: 0.85; } .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-ghost { background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-300); padding: 9px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .btn-ghost:hover { background: var(--gray-300); }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 16px 24px 8px; }
+    .stat { background: white; border-radius: 8px; padding: 14px 16px; border: 1px solid var(--gray-300); }
+    .stat .num { font-size: 30px; font-weight: 800; line-height: 1; }
+    .stat .lbl { font-size: 10px; color: var(--gray-500); margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat.red .num { color: var(--red); } .stat.yellow .num { color: var(--yellow); }
+    .stat.magenta .num { color: var(--magenta); } .stat.green .num { color: var(--green); }
+
+    .progress-wrap { padding: 4px 24px 12px; }
+    .progress-label { font-size: 11px; color: var(--gray-500); margin-bottom: 5px; font-weight: 600; display: flex; justify-content: space-between; }
+    .progress-bar { background: var(--gray-300); border-radius: 999px; height: 6px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--magenta); border-radius: 999px; transition: width 0.4s ease; }
+
+    .cal-status-bar { margin: 0 24px 12px; background: white; border-radius: 8px; border: 1px solid var(--gray-300); padding: 10px 14px; font-size: 12px; color: var(--gray-700); display: flex; align-items: center; gap: 8px; }
+    .cal-status-bar.loading { color: var(--gray-500); }
+    .cal-status-bar.done { color: var(--green); font-weight: 600; }
+    .cal-status-bar.error { color: var(--red); }
+
+    .section { padding: 12px 24px 4px; }
+    .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-500); display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .dot-red { background: var(--red); } .dot-yellow { background: var(--yellow); }
+    .dot-blue { background: var(--blue); } .dot-gray { background: var(--gray-300); }
+    .dot-magenta { background: var(--magenta); }
+
+    .task-list { display: flex; flex-direction: column; gap: 6px; }
+    .card { background: white; border-radius: 8px; padding: 12px 14px; border: 1px solid var(--gray-300); border-left-width: 3px; display: flex; align-items: flex-start; gap: 12px; transition: opacity 0.2s, background 0.2s; }
+    .card.red { border-left-color: var(--red); } .card.yellow { border-left-color: var(--yellow); }
+    .card.blue { border-left-color: var(--blue); } .card.gray { border-left-color: var(--gray-300); }
+    .card.magenta { border-left-color: var(--magenta); }
+    .card.done { opacity: 0.4; background: var(--gray-100); }
+    .card.done .card-name { text-decoration: line-through; color: var(--gray-500); }
+    .hide-done .card.done { display: none; }
+
+    .check-wrap { flex-shrink: 0; margin-top: 2px; }
+    .check-box { width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--gray-300); background: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+    .check-box:hover { border-color: var(--magenta); }
+    .check-box.checked { background: var(--green); border-color: var(--green); }
+    .check-box.checked::after { content: '✓'; color: white; font-size: 11px; font-weight: 800; }
+
+    .card-content { flex: 1; min-width: 0; }
+    .card-name { font-size: 13px; font-weight: 700; color: var(--dark); cursor: pointer; }
+    .card-name:hover { color: var(--magenta); }
+    .card-desc { font-size: 12px; color: var(--gray-500); margin-top: 4px; line-height: 1.45; }
+    .card-meta { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; align-items: center; }
+    .badge { font-size: 10px; font-weight: 700; padding: 2px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .b-gray { background: var(--gray-100); color: var(--gray-700); }
+    .b-red { background: #fee2e2; color: #b91c1c; }
+    .b-yellow { background: #fef3c7; color: #92400e; }
+    .b-blue { background: #dbeafe; color: #1e40af; }
+    .b-magenta { background: var(--magenta-light); color: var(--magenta); }
+    .b-green { background: #d1fae5; color: #065f46; }
+    .b-purple { background: #ede9fe; color: #5b21b6; }
+    .b-orange { background: #fff7ed; color: #9a3412; }
+
+    /* Calendar status badge on each card */
+    .cal-badge { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; }
+    .cal-badge.scheduled { background: #dbeafe; color: #1e40af; }
+    .cal-badge.done-cal { background: #d1fae5; color: #065f46; }
+    .cal-badge.loading-cal { background: var(--gray-100); color: var(--gray-500); font-style: italic; }
+
+    .card-date { font-size: 11px; color: var(--gray-500); font-weight: 600; white-space: nowrap; flex-shrink: 0; margin-top: 2px; }
+    .card-date.overdue { color: var(--red); font-weight: 800; }
+
+    .drive-panel { margin: 12px 24px; background: white; border-radius: 8px; border: 1px solid var(--gray-300); overflow: hidden; }
+    .drive-panel-header { padding: 10px 16px; background: var(--gray-100); font-size: 12px; font-weight: 700; color: var(--gray-700); display: flex; justify-content: space-between; align-items: center; }
+    .drive-panel-body { padding: 14px 16px; font-size: 13px; color: var(--gray-700); line-height: 1.65; white-space: pre-wrap; }
+
+    .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--gray-300); border-top-color: var(--magenta); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .footer { padding: 14px 24px; font-size: 11px; color: var(--gray-500); border-top: 1px solid var(--gray-300); margin-top: 16px; }
+
+    /* ── TASK GROUP ── */
+    .task-group { border: 1.5px solid #e0d4f5; border-radius: 10px; padding: 8px 8px 8px 8px; background: #faf8ff; margin-bottom: 2px; }
+    .task-group-header { font-size: 10px; font-weight: 800; color: #7c3aed; text-transform: uppercase; letter-spacing: 0.07em; padding: 0 4px 8px 4px; display: flex; align-items: center; gap: 6px; }
+    .task-group-header::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #7c3aed; flex-shrink: 0; }
+    .task-group .card { margin-bottom: 6px; }
+    .task-group .card:last-child { margin-bottom: 0; }
+
+    /* ── BRIEFING BUTTON ── */
+    .briefing-btn { background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px 5px; border-radius: 4px; color: var(--gray-500); transition: all 0.15s; margin-left: auto; flex-shrink: 0; opacity: 0.6; }
+    .briefing-btn:hover { opacity: 1; background: var(--magenta-light); color: var(--magenta); }
+
+    /* ── DRAWER OVERLAY ── */
+    .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+    .drawer-overlay.open { opacity: 1; pointer-events: all; }
+
+    /* ── DRAWER PANEL ── */
+    .drawer { position: fixed; top: 0; right: 0; height: 100vh; width: min(460px, 100vw); background: white; z-index: 101; box-shadow: -4px 0 24px rgba(0,0,0,0.18); transform: translateX(100%); transition: transform 0.28s cubic-bezier(.4,0,.2,1); display: flex; flex-direction: column; overflow: hidden; }
+    .drawer.open { transform: translateX(0); }
+
+    .drawer-header { padding: 18px 20px 14px; border-bottom: 1px solid var(--gray-300); display: flex; align-items: flex-start; gap: 12px; flex-shrink: 0; }
+    .drawer-header-text { flex: 1; min-width: 0; }
+    .drawer-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--magenta); margin-bottom: 5px; }
+    .drawer-title { font-size: 15px; font-weight: 800; color: var(--dark); line-height: 1.3; }
+    .drawer-close { background: var(--gray-100); border: none; cursor: pointer; font-size: 16px; padding: 5px 9px; border-radius: 6px; color: var(--gray-500); flex-shrink: 0; margin-top: 2px; }
+    .drawer-close:hover { background: var(--gray-300); }
+
+    .drawer-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
+
+    .briefing-section { }
+    .briefing-section-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; color: var(--magenta); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    .briefing-section-title::after { content: ''; flex: 1; height: 1px; background: var(--magenta-light); }
+    .briefing-text { font-size: 13px; color: var(--gray-700); line-height: 1.65; }
+    .briefing-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+    .briefing-list li { font-size: 13px; color: var(--gray-700); line-height: 1.5; padding-left: 16px; position: relative; }
+    .briefing-list li::before { content: '›'; position: absolute; left: 0; color: var(--magenta); font-weight: 800; }
+    .briefing-success { background: #d1fae5; border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #065f46; font-weight: 600; line-height: 1.5; }
+    .briefing-context { background: var(--gray-100); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--gray-500); line-height: 1.6; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🎯 Central de Demandas — Diego</h1>
+    <p id="lastUpdate">Carregando...</p>
+  </div>
+  <div class="header-btns">
+    <button class="btn-ghost" id="btnToggleDone" onclick="toggleHideDone()">Ocultar concluídas</button>
+    <button class="btn" id="btnCheck" onclick="checkDrive()">🔍 Fazer Varredura</button>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat red"><div class="num" id="statUrgent">2</div><div class="lbl">Urgente / Hoje</div></div>
+  <div class="stat yellow"><div class="num" id="statWeek">5</div><div class="lbl">Esta Semana</div></div>
+  <div class="stat green"><div class="num" id="statDone">0</div><div class="lbl">Concluídas</div></div>
+  <div class="stat magenta"><div class="num" id="statTotal">13</div><div class="lbl">Total Tasks</div></div>
+</div>
+
+<div class="progress-wrap">
+  <div class="progress-label"><span>Progresso geral</span><span id="progressPct">0%</span></div>
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+</div>
+
+<div class="cal-status-bar loading" id="calStatusBar">
+  <span class="spinner"></span> Cruzando tasks com agenda...
+</div>
+
+<!-- URGENTE HOJE -->
+<div class="section">
+  <div class="section-title"><span class="dot dot-red"></span> Urgente — Hoje (22/05)</div>
+  <div class="task-list" id="list-urgente">
+
+    <div class="card red" id="task-fabiano"
+         data-keywords="transição dri cargo engenheiro contexto"
+         data-attendees="fabiano">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-fabiano')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Conversar com Fabiano sobre transição</div>
+        <div class="card-desc">Apresentar plano de transição com Rúbia. Paulo já vai ter falado com ele antes. Deixar agenda livre em 10 dias.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Interno</span>
+          <span class="badge b-red">Hoje</span>
+          <span class="cal-badge loading-cal" id="cal-task-fabiano">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date overdue">22/05</div>
+    </div>
+
+    <div class="card yellow" id="task-rubia"
+         data-keywords="transição onboarding kit-code uic board suporte"
+         data-attendees="rubia">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-rubia')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Alinhar com Rúbia sobre transição</div>
+        <div class="card-desc">Passar UIC, board, onboarding e kit-code. Definir suporte nos primeiros 5 onboardings.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Interno</span>
+          <span class="badge b-yellow">Esta semana</span>
+          <span class="cal-badge loading-cal" id="cal-task-rubia">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">22–23/05</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ESTA SEMANA -->
+<div class="section">
+  <div class="section-title"><span class="dot dot-yellow"></span> Esta Semana</div>
+  <div class="task-list" id="list-semana">
+
+    <div class="card blue" id="task-pirola-stallin"
+         data-keywords="cargo engenheiro aumento função dri otallin formalizar"
+         data-attendees="pirola stallin">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-pirola-stallin')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Conversar com Pirola e Stallin — nova função + aumento</div>
+        <div class="card-desc">Formalizar cargo de Engenheiro de Contexto de AI (DRI). Pedir aumento. Alinhar plano de 90 dias e período em Portugal.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Estratégia</span>
+          <span class="badge b-blue">Segunda 25/05</span>
+          <span class="cal-badge loading-cal" id="cal-task-pirola-stallin">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">Seg 25/05</div>
+    </div>
+
+    <div class="card blue" id="task-matriz-decisao"
+         data-keywords="matriz decisão distribuição pública privada">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-matriz-decisao')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Alinhar Matriz de Decisão com Pirola</div>
+        <div class="card-desc">Critérios para separar oferta pública (≤R$5M → CVM 88) de privada (>R$5M → institucional). Integrar ao HubSpot.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-blue">Esta semana</span>
+          <span class="cal-badge loading-cal" id="cal-task-matriz-decisao">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">22–26/05</div>
+    </div>
+
+    <div class="card blue" id="task-felipe-nicolas"
+         data-keywords="mapeamento investidor perfil institucional enxoval documental lâmina memorando onepager faq felipe nicolas"
+         data-attendees="felipe nicolas">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-felipe-nicolas')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Call c/ Felipe e Nicolas — Mapeamento de Investidores + Enxoval</div>
+        <div class="card-desc">Definir metodologia de mapeamento de perfil dos investidores institucionais e fazer inventário completo do enxoval de documentos (lâminas, FAQs, memorandos, One Pagers, PPTs).</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-blue">Esta semana</span>
+          <span class="badge b-purple" style="font-size:9px;">→ skill-mapeamento-investidores</span>
+          <span class="badge b-purple" style="font-size:9px;">→ skill-enxoval-documental</span>
+          <span class="cal-badge loading-cal" id="cal-task-felipe-nicolas">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">26/05 15h</div>
+    </div>
+
+    <div class="card blue" id="task-nicolas"
+         data-keywords="qualidade qa operações suporte distribuição método"
+         data-attendees="nicolas stallin">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-nicolas')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Apoiar Nicolas (c/ Stallin)</div>
+        <div class="card-desc">Criar método para ouvir e dar suporte ao trabalho de Nicolas na distribuição.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-blue">Esta semana</span>
+          <span class="cal-badge loading-cal" id="cal-task-nicolas">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">22–26/05</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- PRÓXIMAS SEMANAS -->
+<div class="section">
+  <div class="section-title"><span class="dot dot-gray"></span> Próximas Semanas</div>
+  <div class="task-list" id="list-proximas">
+
+    <div class="card gray" id="task-plano90"
+         data-keywords="plano 90 dias cronograma bradesco dtvm otali"
+         data-attendees="pirola">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-plano90')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Criar plano de ação 90 dias</div>
+        <div class="card-desc">Cronograma dos 3 projetos: Bradesco ($12M), DTVM (90 dias BC) e Projeto Otali. Alinhar com Pirola.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Estratégia</span>
+          <span class="badge b-gray">Após 25/05</span>
+          <span class="cal-badge loading-cal" id="cal-task-plano90">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">Após 25/05</div>
+    </div>
+
+    <div class="card gray" id="task-apresentar-inv"
+         data-keywords="apresentar mapeamento investidor diretoria"
+         data-attendees="pirola stallin">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-apresentar-inv')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Apresentar Mapeamento de Investidores para Pirola e Stallin</div>
+        <div class="card-desc">Após definir perguntas e organizar as reuniões com os investidores.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-gray">A definir</span>
+          <span class="cal-badge loading-cal" id="cal-task-apresentar-inv">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">A definir</div>
+    </div>
+
+    <div class="card gray" id="task-validar-enxoval"
+         data-keywords="validar enxoval aprovação documentos estrutura"
+         data-attendees="pirola">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-validar-enxoval')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Validar Enxoval com Pirola</div>
+        <div class="card-desc">Apresentar estrutura de documentos para aprovação da diretoria.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-gray">A definir</span>
+          <span class="cal-badge loading-cal" id="cal-task-validar-enxoval">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">A definir</div>
+    </div>
+
+    <div class="card gray" id="task-fup"
+         data-keywords="follow-up fup automatizado gatilho negociação"
+         data-attendees="pirola stallin">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-fup')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Criar Matriz de Follow-Up (c/ Pirola e Stallin)</div>
+        <div class="card-desc">Lógica e arquitetura do FUP automatizado das negociações. Gatilhos: termo enviado, DF entregue, etc.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-gray">A definir</span>
+          <span class="cal-badge loading-cal" id="cal-task-fup">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">A definir</div>
+    </div>
+
+    <div class="card gray" id="task-mapear-skills"
+         data-keywords="mapear skills rotinas operações jurídico área mapeamento"
+         data-attendees="fabiano silvio">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-mapear-skills')"></div></div>
+      <div class="card-content">
+        <div class="card-name">Mapear skills com Fabiano e Silvio (operações, jurídico)</div>
+        <div class="card-desc">Trabalhar lado a lado: por área → por pessoa → por data/horário. Coletar muito contexto antes de implementar.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">DRI / Operações</span>
+          <span class="badge b-gray">Próximo mês SP</span>
+          <span class="cal-badge loading-cal" id="cal-task-mapear-skills">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">Próximo mês</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- SKILLS A CRIAR -->
+<div class="section">
+  <div class="section-title"><span class="dot dot-magenta"></span> Skills a Criar</div>
+  <div class="task-list">
+
+    <div class="card magenta" id="task-skill-oferta"
+         data-keywords="skill lancamento oferta pública lançamento"
+         data-no-autocomplete="true">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-skill-oferta')"></div></div>
+      <div class="card-content">
+        <div class="card-name">skill-lancamento-oferta-publica</div>
+        <div class="card-desc">Automação completa do fluxo de Oferta Pública. Primeira a ser construída — libera 30-40h/mês do time.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-red">Prioridade 1</span>
+          <span class="cal-badge loading-cal" id="cal-task-skill-oferta">⏳ agenda...</span>
+        </div>
+      </div>
+      <div class="card-date">P1</div>
+    </div>
+
+    <div class="card magenta" id="task-skill-matriz" data-no-autocomplete="true">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-skill-matriz')"></div></div>
+      <div class="card-content">
+        <div class="card-name">skill-matriz-decisao-distribuicao</div>
+        <div class="card-desc">Critérios automáticos no HubSpot para rotear pública vs. privada na entrada da operação.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-red">Prioridade 1</span>
+        </div>
+      </div>
+      <div class="card-date">P1</div>
+    </div>
+
+    <div class="card magenta" id="task-skill-inv" data-no-autocomplete="true">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-skill-inv')"></div></div>
+      <div class="card-content">
+        <div class="card-name">skill-mapeamento-investidores</div>
+        <div class="card-desc">Repositório dinâmico com perfil detalhado de cada investidor institucional, atualizado continuamente.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-yellow">Prioridade 2</span>
+        </div>
+      </div>
+      <div class="card-date">P2</div>
+    </div>
+
+    <div class="card magenta" id="task-skill-enxoval" data-no-autocomplete="true">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-skill-enxoval')"></div></div>
+      <div class="card-content">
+        <div class="card-name">skill-enxoval-documental</div>
+        <div class="card-desc">Padronização e centralização de todos os docs de oferta pública e privada. Aprovação pelo Pirola.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-yellow">Prioridade 2</span>
+        </div>
+      </div>
+      <div class="card-date">P2</div>
+    </div>
+
+    <div class="card magenta" id="task-skill-qa" data-no-autocomplete="true">
+      <div class="check-wrap"><div class="check-box" onclick="toggleTask('task-skill-qa')"></div></div>
+      <div class="card-content">
+        <div class="card-name">skill-qa-operacoes</div>
+        <div class="card-desc">Centralizar histórico de Q&A das operações e incorporar as perguntas recorrentes nos materiais de oferta.</div>
+        <div class="card-meta">
+          <span class="badge b-gray">Negócios</span>
+          <span class="badge b-blue">Prioridade 3</span>
+        </div>
+      </div>
+      <div class="card-date">P3</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- AI tasks are injected directly into existing sections -->
+
+<!-- BRIEFING DRAWER -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeBriefing()"></div>
+<div class="drawer" id="briefingDrawer">
+  <div class="drawer-header">
+    <div class="drawer-header-text">
+      <div class="drawer-tag" id="drawerTag">Briefing</div>
+      <div class="drawer-title" id="drawerTitle"></div>
+    </div>
+    <button class="drawer-close" onclick="closeBriefing()">✕</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</div>
+
+<!-- DRIVE CHECK PANEL -->
+<div class="drive-panel" id="drivePanel" style="display:none">
+  <div class="drive-panel-header">
+    <span>🔍 Varredura — Drive + E-mail</span>
+    <button onclick="document.getElementById('drivePanel').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--gray-500)">✕</button>
+  </div>
+  <div class="drive-panel-body" id="drivePanelBody"></div>
+</div>
+
+<div class="footer">
+  Central de Demandas · AmFi · Agenda + Drive sincronizados · Rotina automática: 9h diariamente
+</div>
+
+<script>
+  const TOTAL_TASKS = 12;
+  const STORAGE_KEY = 'amfi-demandas-done-v1';
+  const MANUAL_UNCHECKED_KEY = 'amfi-manual-unchecked-v1';
+
+  // ── PERSIST ───────────────────────────────────────────────────
+  function loadDone() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch(e) { return {}; } }
+  function saveDone(d) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch(e) {} }
+  function loadManualUnchecked() { try { return JSON.parse(localStorage.getItem(MANUAL_UNCHECKED_KEY) || '{}'); } catch(e) { return {}; } }
+  function saveManualUnchecked(d) { try { localStorage.setItem(MANUAL_UNCHECKED_KEY, JSON.stringify(d)); } catch(e) {} }
+
+  function toggleTask(id) {
+    const d = loadDone();
+    const wasChecked = !!d[id];
+    d[id] = !wasChecked;
+    saveDone(d);
+    // Se o usuário desmarcou manualmente, registra para não re-auto-completar
+    const mu = loadManualUnchecked();
+    if (wasChecked) { mu[id] = true; } else { delete mu[id]; }
+    saveManualUnchecked(mu);
+    applyState(d);
+  }
+
+  // Auto-completa task quando detectada como Realizado no Calendar
+  // Respeita desmarques manuais e exclui tasks que requerem entrega além da reunião
+  function autoCompleteFromCalendar(taskId) {
+    const card = document.getElementById(taskId);
+    if (card?.getAttribute('data-no-autocomplete') === 'true') return; // entrega vai além da reunião
+    const mu = loadManualUnchecked();
+    if (mu[taskId]) return; // usuário desmarcou manualmente — não forçar
+    const d = loadDone();
+    if (d[taskId]) return; // já está concluída
+    d[taskId] = true;
+    saveDone(d);
+    applyState(d);
+  }
+
+  function applyState(done) {
+    let n = 0;
+    document.querySelectorAll('.card[id]').forEach(card => {
+      const isDone = !!done[card.id];
+      const box = card.querySelector('.check-box');
+      card.classList.toggle('done', isDone);
+      box.classList.toggle('checked', isDone);
+      if (isDone) n++;
+    });
+    updateStats(n);
+  }
+
+  function updateStats(n) {
+    const aiCount = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]').length;
+    const total = TOTAL_TASKS + aiCount;
+    document.getElementById('statDone').textContent = n ?? 0;
+    document.getElementById('statTotal').textContent = total;
+    const pct = total > 0 ? Math.round(((n ?? 0) / total) * 100) : 0;
+    document.getElementById('progressPct').textContent = pct + '%';
+    document.getElementById('progressFill').style.width = pct + '%';
+  }
+
+  let hideDone = false;
+  function toggleHideDone() {
+    hideDone = !hideDone;
+    document.body.classList.toggle('hide-done', hideDone);
+    document.getElementById('btnToggleDone').textContent = hideDone ? 'Mostrar todas' : 'Ocultar concluídas';
+  }
+
+  // ── TIMESTAMP ─────────────────────────────────────────────────
+  const now = new Date();
+  document.getElementById('lastUpdate').textContent =
+    'Atualizado: ' + now.toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long' }) +
+    ' às ' + now.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+
+  // ── FORMAT DATE ───────────────────────────────────────────────
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    const day = d.toLocaleDateString('pt-BR', { weekday:'short', day:'2-digit', month:'2-digit' });
+    const time = d.getHours() ? d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }) : '';
+    return day + (time ? ' ' + time : '');
+  }
+
+  function isPast(iso) { return new Date(iso) < new Date(); }
+
+  // ── CALENDAR CROSS-REFERENCE ──────────────────────────────────
+  async function loadCalendarStatus() {
+    const bar = document.getElementById('calStatusBar');
+    try {
+      // Look back 7 days to catch recent "Realizado" events too
+      const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const end   = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      const raw = await window.cowork.callMcpTool(
+        'mcp__2bcf1cbe-23ad-4d23-8641-4b2f88e18a8b__list_events',
+        { startTime: start, endTime: end, orderBy: 'startTime', pageSize: 100 }
+      );
+
+      if (!raw) throw new Error('Resposta vazia da agenda');
+
+      // callMcpTool can return either the object directly OR a content-wrapper array
+      let result = raw;
+      if (!result.events && result.content && Array.isArray(result.content)) {
+        try {
+          const txt = result.content.find(c => c.type === 'text')?.text;
+          if (txt) result = JSON.parse(txt);
+        } catch(e) { /* ignore parse error, fall through */ }
+      }
+
+      if (!result || !Array.isArray(result.events)) {
+        throw new Error('Formato inesperado: ' + JSON.stringify(result).substring(0, 120));
+      }
+
+      const events = result.events;
+      let matched = 0;
+
+      document.querySelectorAll('.card[data-keywords]').forEach(card => {
+        const taskId = card.id;
+        const keywords = card.getAttribute('data-keywords').toLowerCase().split(' ').filter(Boolean);
+        // Expected attendees for this task (first names, e.g. "felipe nicolas")
+        const expectedAttendees = (card.getAttribute('data-attendees') || '').toLowerCase().split(' ').filter(Boolean);
+        const calEl = document.getElementById('cal-' + taskId);
+        if (!calEl) return;
+
+        let bestEvent = null;
+        let bestScore = 0;
+
+        events.forEach(ev => {
+          // TIER 1 (mandatory): at least 1 keyword must appear in event title
+          const title = (ev.summary || '').toLowerCase();
+          let titleScore = 0;
+          keywords.forEach(kw => { if (title.includes(kw)) titleScore++; });
+          if (titleScore === 0) return;
+
+          // TIER 2 (mandatory when data-attendees is set): ALL expected attendees
+          // must be present — if any is missing, this is not the right meeting
+          const evAttendeeFirstNames = (ev.attendees || []).map(a =>
+            (a.email || '').split('@')[0].split('.')[0].toLowerCase()
+          );
+          if (expectedAttendees.length > 0) {
+            const allPresent = expectedAttendees.every(name => evAttendeeFirstNames.includes(name));
+            if (!allPresent) return; // missing an expected attendee — skip event
+          }
+
+          // Score: title keyword count (attendees already validated, not weighted)
+          const finalScore = titleScore * 10 + evAttendeeFirstNames.length;
+          if (finalScore > bestScore) { bestScore = finalScore; bestEvent = ev; }
+        });
+
+        // Require at least 1 title match (score >= 10)
+        if (bestEvent && bestScore >= 10) {
+          matched++;
+          const startIso = bestEvent.start?.dateTime || bestEvent.start?.date || '';
+          const dateStr  = startIso ? fmtDate(startIso) : '';
+          const past     = startIso ? isPast(startIso) : false;
+
+          calEl.style.display = '';
+          // Store event key so transcript cache knows which event was matched
+          calEl.setAttribute('data-event-key', bestEvent.id || bestEvent.summary || taskId);
+          if (past) {
+            calEl.className = 'cal-badge done-cal';
+            calEl.textContent = '✅ Realizado: ' + dateStr;
+            // Auto-marca como concluída (respeita desmarques manuais)
+            autoCompleteFromCalendar(taskId);
+          } else {
+            calEl.className = 'cal-badge scheduled';
+            calEl.textContent = '📅 Agendado: ' + dateStr;
+          }
+        } else {
+          calEl.className = 'cal-badge';
+          calEl.style.display = 'none';
+        }
+      });
+
+      bar.className = 'cal-status-bar done';
+      bar.textContent = '📅 Agenda verificada — ' + matched + ' tasks com eventos encontrados';
+      // Auto-analyze transcripts for all "Realizado" tasks in background
+      setTimeout(() => autoAnalyzeRealizado(), 600);
+
+    } catch(err) {
+      bar.className = 'cal-status-bar error';
+      bar.textContent = '⚠️ Agenda: ' + (err.message || String(err));
+      document.querySelectorAll('.cal-badge.loading-cal').forEach(el => el.style.display = 'none');
+    }
+  }
+
+  // ── VARREDURA (Drive + E-mail) ────────────────────────────────
+  async function checkDrive() {
+    loadCalendarStatus();
+    const btn = document.getElementById('btnCheck');
+    const panel = document.getElementById('drivePanel');
+    const body = document.getElementById('drivePanelBody');
+    btn.disabled = true; btn.textContent = 'Varrendo...';
+    panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    body.innerHTML = '<span class="spinner"></span> Iniciando varredura de Drive e E-mail...';
+
+    let driveResult = '';
+    let emailResult = '';
+
+    // ── 1. DRIVE ─────────────────────────────────────────────────
+    try {
+      body.innerHTML = '<span class="spinner"></span> Verificando Drive...';
+      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      const res = await window.cowork.callMcpTool(
+        'mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__search_files',
+        { query: "parentId = '1uEmuOXVhrL2kCOHpZtGrJ9saIA1VRLG1' and modifiedTime > '" + yesterday.toISOString() + "'" }
+      );
+      const files = res?.files || [];
+      if (files.length > 0) {
+        const summary = files.map(f =>
+          '"' + f.title + '" (' + new Date(f.modifiedTime).toLocaleString('pt-BR') + ')' +
+          (f.contentSnippet ? '\n' + f.contentSnippet.substring(0, 500) : '')
+        ).join('\n\n---\n\n');
+        driveResult = await window.cowork.askClaude(
+          'Você é o assistente do Diego Simoes, DRI de AI na AmFi. Analise os arquivos da pasta Direcionamentos. Extraia APENAS ações concretas para o Diego: o que ele precisa fazer, prazos, urgências. Cada ação deve começar com →. Se não houver nada acionável, diga "Nenhuma nova demanda no Drive."\n\n' + summary, []
+        );
+      } else {
+        driveResult = 'Nenhum arquivo novo nas últimas 24h.';
+      }
+    } catch(err) { driveResult = '⚠️ ' + (err.message || String(err)); }
+
+    // ── 2. E-MAIL ─────────────────────────────────────────────────
+    try {
+      body.innerHTML = '<span class="spinner"></span> Lendo e-mails...';
+      const [starredRes, unreadRes, vipRes] = await Promise.all([
+        window.cowork.callMcpTool('mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
+          { query: 'is:starred newer_than:7d', pageSize: 10 }),
+        window.cowork.callMcpTool('mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
+          { query: 'is:unread is:important newer_than:3d', pageSize: 10 }),
+        // E-mails de pessoas-chave — lidos ou não
+        window.cowork.callMcpTool('mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
+          { query: 'from:(paulo@amfi.finance OR pirola@amfi.finance OR stallin@amfi.finance OR fabiano@amfi.finance OR silvio@amfi.finance) newer_than:7d', pageSize: 15 })
+      ]);
+
+      const seen = new Set();
+      const threads = [];
+      const absorb = (res) => {
+        let list = res?.threads || [];
+        if (!list.length && res?.content) {
+          try { const t = res.content.find(c=>c.type==='text')?.text; if(t) list = JSON.parse(t).threads || []; } catch(e){}
+        }
+        list.forEach(t => { if (!seen.has(t.id)) { seen.add(t.id); threads.push(t); } });
+      };
+      absorb(starredRes); absorb(unreadRes); absorb(vipRes);
+
+      if (threads.length > 0) {
+        const emailSummary = threads.map(t => {
+          const msg = (t.messages || []).slice(-1)[0] || {};
+          return `De: ${msg.sender||'?'} | Assunto: ${msg.subject||'?'} | Data: ${msg.date ? new Date(msg.date).toLocaleString('pt-BR') : '?'}\n${msg.snippet||''}`;
+        }).join('\n\n---\n\n');
+
+        emailResult = await window.cowork.askClaude(
+          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Para cada ação, use o formato: → [ação concreta — para quem — prazo se mencionado]. Ignore e-mails informativos sem ação requerida. Se não houver ações, diga "Nenhuma ação pendente nos e-mails."\n\nE-MAILS:\n${emailSummary}`, []
+        );
+
+        // Transformar ações em tasks na seção de IA
+        const _emailText = typeof emailResult === 'string' ? emailResult : (emailResult?.text || '');
+        const actionLines = _emailText.split('\n').filter(l => l.trim().startsWith('→'));
+        if (actionLines.length > 0) {
+          const emailTasks = actionLines.map(l => ({
+            dono: 'Diego',
+            acao: l.replace(/^→\s*/, '').trim(),
+            prazo: 'esta semana'
+          }));
+          createAITasks('email-scan', 'Varredura de E-mail', emailTasks);
+        }
+      } else {
+        emailResult = 'Nenhum e-mail importante não lido nos últimos dias.';
+      }
+    } catch(err) { emailResult = '⚠️ ' + (err.message || String(err)); }
+
+    // ── RENDER ────────────────────────────────────────────────────
+    // askClaude pode retornar string ou objeto {text: ...}
+    function extractText(val) {
+      if (typeof val === 'string') return val;
+      if (val?.text) return val.text;
+      if (val?.content && typeof val.content === 'string') return val.content;
+      if (Array.isArray(val?.content)) return val.content.find(c=>c.type==='text')?.text || JSON.stringify(val);
+      return JSON.stringify(val);
+    }
+    const driveText = extractText(driveResult);
+    const emailText = extractText(emailResult);
+
+    body.innerHTML = `
+      <div style="margin-bottom:14px;">
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--magenta);margin-bottom:7px;">📂 Drive</div>
+        <div style="font-size:13px;color:var(--gray-700);line-height:1.65;white-space:pre-wrap;">${driveText}</div>
+      </div>
+      <div style="border-top:1px solid var(--gray-300);padding-top:14px;">
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--magenta);margin-bottom:7px;">📧 E-mail</div>
+        <div style="font-size:13px;color:var(--gray-700);line-height:1.65;white-space:pre-wrap;">${emailText}</div>
+      </div>`;
+
+    btn.disabled = false; btn.innerHTML = '🔍 Fazer Varredura';
+    document.getElementById('lastUpdate').textContent =
+      'Última varredura: ' + new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  }
+
+  // ── BRIEFING DATA ─────────────────────────────────────────────
+  const BRIEFINGS = {
+    'task-fabiano': {
+      tag: 'Urgente · Hoje 22/05',
+      title: 'Conversar com Fabiano sobre transição',
+      driveSearch: 'transição dri alinhamento fabiano',
+      objetivo: 'Apresentar formalmente a nova função de DRI (Engenheiro de Contexto de AI) para o Fabiano e alinhar como vai funcionar a transição do suporte que Diego prestava anteriormente.',
+      pontos: [
+        'Paulo David já vai ter conversado com o Fabiano antes dessa reunião — confirmar o alinhamento e reforçar a mensagem.',
+        'Apresentar o que muda: Diego passa a focar em AI/DRI, o suporte operacional vai para Rúbia.',
+        'Propor os próximos 10 dias com agenda livre para finalizar a transição sem interrupções.',
+        'Deixar claro como vai funcionar o canal de comunicação daqui pra frente.',
+        'Mostrar o plano de DRI de alto nível — o que vai ser entregue nos primeiros 90 dias.'
+      ],
+      contexto: 'Diego foi promovido a DRI (Engenheiro de Contexto de AI) — um cargo novo na AmFi criado para sistematizar o uso de AI no negócio. Paulo David liderou essa decisão. O Fabiano precisa entender que a mudança é estratégica e que o suporte vai continuar — só com outro dono.',
+      sucesso: 'Fabiano alinhado com a mudança de função. Primeiros 10 dias da agenda definidos. Canal de comunicação claro.'
+    },
+    'task-rubia': {
+      tag: 'Urgente · 22–23/05',
+      title: 'Alinhar com Rúbia sobre transição',
+      driveSearch: 'transição rubia onboarding kit',
+      objetivo: 'Fazer o handover completo do onboarding para a Rúbia e definir como será o suporte estruturado nos primeiros 5 onboardings que ela conduzir sozinha.',
+      pontos: [
+        'Passar todos os materiais: UIC (User Interface Checklist), board de contexto, kit de onboarding e kit-code.',
+        'Mapear os próximos 5 onboardings na agenda — Diego participará como suporte/observador.',
+        'Clareza sobre quem faz o quê em cada etapa do onboarding.',
+        'Onde ficam os materiais (Drive, Notion, etc.) e como manter atualizado.',
+        'Quando e como Rúbia deve acionar Diego nos primeiros meses se surgir dúvida.'
+      ],
+      contexto: 'Diego era o responsável pelo onboarding de novos clientes/usuários. Com a promoção para DRI, Rúbia assume essa função. A transição precisa ser suave para não afetar a qualidade do onboarding. Os 5 primeiros acompanhamentos de Diego servem como garantia de qualidade.',
+      sucesso: 'Rúbia tem todos os materiais de acesso. Calendário dos 5 primeiros onboardings definido. Processo documentado e entendido.'
+    },
+    'task-pirola-stallin': {
+      tag: 'Esta semana · Seg 25/05',
+      title: 'Formalizar nova função + aumento com Pirola e Stallin',
+      driveSearch: 'cargo engenheiro dri otallin pirola stallin',
+      objetivo: 'Formalizar oficialmente o cargo de Engenheiro de Contexto de AI (DRI), negociar aumento salarial e alinhar o plano de 90 dias e a questão do período em Portugal.',
+      pontos: [
+        'Apresentar o escopo formal do cargo DRI: o que é, o que entrega, como se mede.',
+        'Proposta de aumento — ter o número na cabeça e a justificativa clara (nova responsabilidade estratégica).',
+        'Plano de 90 dias com os 3 projetos: Bradesco ($12M), DTVM (aprovação BC em 90 dias), Projeto Otali.',
+        'Como o DRI se encaixa em cada um desses projetos e qual o valor que gera.',
+        'Período em Portugal: quando, por quanto tempo, o que vai fazer lá.'
+      ],
+      contexto: 'A promoção foi concedida informalmente por Paulo David. Pirola e Stallin precisam validar e formalizar. É importante entrar com segurança na conversa — a posição já está construída, é uma formalização, não uma negociação do zero.',
+      sucesso: 'Cargo formalizado com novo título. Aumento acordado. Plano de 90 dias aprovado. Questão de Portugal resolvida.'
+    },
+    'task-matriz-decisao': {
+      tag: 'Esta semana · 22–26/05',
+      title: 'Alinhar Matriz de Decisão de Distribuição com Pirola',
+      driveSearch: 'matriz decisão distribuição pública privada hubspot',
+      objetivo: 'Definir os critérios exatos para separar operações de Oferta Pública (CVM 88, ≤R$5M) de Oferta Privada (>R$5M, institucional) e criar a especificação para automatizar esse roteamento no HubSpot.',
+      pontos: [
+        'Critério de valor: ≤R$5M → pública (CVM 88), >R$5M → privada (institucional). Confirmar se há outros critérios além do valor.',
+        'Quais os casos de borda? (ex: operação que começa pública e muda de tamanho)',
+        'Fluxo diferente para cada modalidade: quais equipes, documentos e etapas mudam?',
+        'Como integrar ao HubSpot: qual campo/propriedade aciona qual pipeline?',
+        'Quem é o responsável por manter essa matriz atualizada?'
+      ],
+      contexto: 'A AmFi trabalha com dois tipos de oferta com regulações e processos completamente diferentes. Hoje o roteamento é manual e depende de quem atende o cliente saber qual modalidade usar. A automatização elimina esse risco operacional e é o pré-requisito para construir a skill-matriz-decisao-distribuicao.',
+      sucesso: 'Critérios de decisão documentados e aprovados pelo Pirola. Spec para automação no HubSpot escrita. Pronto para construir a skill.'
+    },
+    'task-felipe-nicolas': {
+      tag: 'Esta semana · 26/05 · 15h',
+      title: 'Call c/ Felipe e Nicolas — Mapeamento de Investidores + Enxoval',
+      driveSearch: 'mapeamento investidores perfil enxoval documental lâmina felipe nicolas',
+      objetivo: 'Numa só call: (1) definir a metodologia para mapear o perfil dos investidores institucionais — quais perguntas fazer, como organizar as reuniões e onde centralizar os dados; (2) fazer o inventário completo do enxoval de documentos — o que existe, o que está desatualizado e o que precisa ser criado do zero.',
+      pontos: [
+        '📊 MAPEAMENTO DE INVESTIDORES — Quais perguntas são essenciais para cada investidor? (preferências de ativo, taxas mínimas, volume por operação, canal de comunicação, velocidade de decisão)',
+        'Como estruturar cada reunião de mapeamento: tempo, formato, quem conduz.',
+        'Lista dos investidores prioritários para mapear primeiro (mais ativos ou maior volume).',
+        'Onde centralizar os dados coletados — vai alimentar a skill-mapeamento-investidores.',
+        'Cronograma: quantas reuniões por semana? Quem agenda?',
+        '📁 ENXOVAL DE DOCUMENTOS — Tipos a mapear: lâminas de fundo, FAQs, memorandos de oferta, One Pagers, PPTs de pitch, contratos-padrão.',
+        'Para cada doc: existe? Está atualizado? Segue o padrão visual AmFi? Quem é o dono?',
+        'Diferença entre enxoval de oferta pública (CVM 88) e privada — quais docs mudam?',
+        'O que precisa ser criado primeiro para não travar operações.',
+        'Onde cada documento fica hoje e onde deveria ficar — base para a skill-enxoval-documental.'
+      ],
+      contexto: 'Reunião já marcada para 26/05 às 15h com Felipe, Nicolas e Stallin. Felipe e Nicolas têm contato direto com os investidores e sabem tanto quais perguntas fazer no mapeamento quanto quais materiais estão faltando no enxoval. Os outputs dessa call vão embasar duas skills: skill-mapeamento-investidores e skill-enxoval-documental.',
+      sucesso: 'Questionário padrão para mapeamento definido. Lista de investidores prioritários criada. Inventário completo do enxoval feito. Gaps documentados. Responsáveis por cada doc definidos.'
+    },
+    'task-nicolas': {
+      tag: 'Esta semana · 22–26/05',
+      title: 'Criar método de apoio ao Nicolas (c/ Stallin)',
+      driveSearch: 'nicolas suporte distribuição qa operações',
+      objetivo: 'Criar um método estruturado para ouvir o Nicolas, entender onde o DRI pode ajudar no trabalho de distribuição dele, e definir os rituais de acompanhamento.',
+      pontos: [
+        'Quais são as tarefas mais repetitivas e demoradas do dia a dia do Nicolas?',
+        'Onde ele perde mais tempo? O que poderia ser automatizado ou facilitado com AI?',
+        'Que informações ele precisa mas não tem fácil acesso hoje?',
+        'Como vai funcionar o canal de suporte DRI → Nicolas: frequência, formato, o que pode ser solicitado.',
+        'Com Stallin: como o suporte ao Nicolas se encaixa na estratégia de distribuição mais ampla?'
+      ],
+      contexto: 'Nicolas está na ponta da distribuição. Para o DRI ser eficaz, precisa de um canal claro com quem está operando no dia a dia. Stallin entra como contexto estratégico para calibrar onde o suporte AI vai gerar mais impacto.',
+      sucesso: 'Mapa de dores do Nicolas documentado. Método de suporte definido. Primeiros rituais de acompanhamento agendados.'
+    },
+    'task-plano90': {
+      tag: 'Próximas semanas · Após 25/05',
+      title: 'Consolidar Plano de Ação 90 Dias',
+      driveSearch: 'plano 90 dias bradesco dtvm otali cronograma',
+      objetivo: 'Montar o plano de 90 dias como DRI, conectando os 3 projetos estratégicos da AmFi com as skills e entregas que o DRI vai gerar em cada frente.',
+      pontos: [
+        'Projeto Bradesco ($12M): onde o DRI encaixa? Quais automações e skills são necessárias?',
+        'Projeto DTVM (90 dias até aprovação BC): cronograma crítico, o que não pode atrasar.',
+        'Projeto Otali: escopo do DRI nesse projeto.',
+        'Milestones semana a semana — o que está entregue ao final de cada mês.',
+        'Como reportar progresso ao Pirola e ao Paulo David?'
+      ],
+      contexto: 'Os 3 projetos estão em andamento simultâneo e têm timelines agressivos. O plano de 90 dias é o instrumento que vai mostrar à diretoria como o DRI agrega valor concreto em cada frente. Deve ser feito depois de formalizar a função com Pirola (task-pirola-stallin).',
+      sucesso: 'Plano de 90 dias documentado, aprovado pelo Pirola, com milestones claros e métricas de sucesso por projeto.'
+    },
+    'task-apresentar-inv': {
+      tag: 'Próximas semanas · A definir',
+      title: 'Apresentar Mapeamento de Investidores para Pirola e Stallin',
+      objetivo: 'Apresentar os insights do mapeamento de perfil de investidores à diretoria e definir como usá-los na estratégia comercial.',
+      pontos: [
+        'Síntese dos perfis mapeados: padrões de comportamento, preferências e tamanho de cada investidor.',
+        'Gaps identificados: o que os investidores querem que a AmFi ainda não oferece?',
+        'Oportunidades imediatas: quais investidores têm maior potencial de aumento de volume?',
+        'Como usar esse mapeamento para personalizar a distribuição.',
+        'Input para construção da skill-mapeamento-investidores.'
+      ],
+      contexto: 'Acontece depois que o mapeamento com os investidores estiver concluído (task-mapeamento-inv). Os dados coletados por Felipe e Nicolas serão consolidados em uma apresentação para a diretoria tomar decisões de estratégia comercial.',
+      sucesso: 'Pirola e Stallin entendem o perfil da base de investidores. Decisões estratégicas sobre produto e distribuição tomadas com base nos dados.'
+    },
+    'task-validar-enxoval': {
+      tag: 'Próximas semanas · A definir',
+      title: 'Validar Enxoval com Pirola',
+      objetivo: 'Apresentar a estrutura completa do enxoval documental para aprovação formal da diretoria antes de começar a produção em escala.',
+      pontos: [
+        'Inventário completo: mostrar o que existe, o que está desatualizado, o que falta.',
+        'Proposta de padronização: templates, nomenclatura, onde ficam os documentos.',
+        'Cronograma de produção: quem faz cada documento e em quanto tempo.',
+        'Prioridade: quais docs são críticos para operações em andamento e devem ser feitos primeiro.',
+        'Custo de produção: interno ou precisa de apoio externo (design, redação)?'
+      ],
+      contexto: 'Depende de task-enxoval estar concluída. O enxoval precisa de aprovação formal do Pirola para garantir que os recursos e o cronograma de produção sejam priorizados.',
+      sucesso: 'Enxoval aprovado. Cronograma de produção de documentos formalizado. Responsáveis definidos.'
+    },
+    'task-fup': {
+      tag: 'Próximas semanas · A definir',
+      title: 'Criar Matriz de Follow-Up Automatizado (c/ Pirola e Stallin)',
+      objetivo: 'Definir a lógica e arquitetura do sistema de FUP automatizado para as negociações — quais gatilhos ativam qual ação, por qual canal, com qual tom.',
+      pontos: [
+        'Mapear os estágios do funil onde o FUP acontece hoje: após envio de termo, após entrega de DF, após reunião, após silêncio.',
+        'Para cada estágio: qual o prazo ideal para FUP? Qual o canal (email, WhatsApp, ligação)? Quem faz?',
+        'Casos especiais: investidor que não responde após X dias, operação que está prestes a expirar.',
+        'Como integrar ao HubSpot como automação.',
+        'Tom e templates de comunicação para cada tipo de FUP.'
+      ],
+      contexto: 'Hoje o FUP é feito manualmente e de forma inconsistente, o que faz oportunidades escaparem por falta de acompanhamento. A automatização pode aumentar significativamente a taxa de conversão sem aumentar o trabalho da equipe comercial.',
+      sucesso: 'Arquitetura do FUP documentada e aprovada. Gatilhos e fluxos definidos. Spec pronta para implementar no HubSpot.'
+    },
+    'task-mapear-skills': {
+      tag: 'Próximo mês · São Paulo',
+      title: 'Mapear Skills com Fabiano e Silvio (Operações, Jurídico)',
+      objetivo: 'Ir a campo em São Paulo para mapear rotinas, processos manuais e gargalos nas áreas de Operações e Jurídico — coletar contexto profundo antes de construir qualquer skill.',
+      pontos: [
+        'Metodologia: trabalhar lado a lado → por área → por pessoa → por data/horário de cada rotina.',
+        'Com Fabiano (Operações): quais rotinas são manuais? O que consome mais tempo? O que depende de uma pessoa só?',
+        'Com Silvio (Jurídico): mesmas perguntas. Foco em compliance, contratos, análise de documentos.',
+        'Capturar exemplos concretos: "toda segunda-feira eu faço X que leva 3h e poderia ser automático".',
+        'Priorizar: quais skills teriam maior impacto imediato?'
+      ],
+      contexto: 'O DRI precisa construir skills com contexto real, não com suposições. A visita a SP serve para imersão nas operações. A abordagem "por área → por pessoa → por data/horário" garante que nenhum processo importante seja esquecido.',
+      sucesso: 'Lista priorizada de skills por área com contexto suficiente para construir cada uma. Cronograma de implementação definido.'
+    },
+    'task-skill-oferta': {
+      tag: 'Skills a Criar · Prioridade 1',
+      title: 'skill-lancamento-oferta-publica',
+      driveSearch: 'skill lancamento oferta publica kick-off',
+      objetivo: 'Construir a skill que automatiza o fluxo completo de Oferta Pública (CVM 88) — desde a captação até o encerramento da oferta.',
+      pontos: [
+        'Mapear o fluxo atual passo a passo: quais etapas existem, quem faz cada uma, quanto tempo leva.',
+        'Identificar quais etapas são 100% automáticas vs quais precisam de validação humana.',
+        'Documentação: quais docs são produzidos em cada etapa? Templates?',
+        'Compliance: quais regras da CVM 88 precisam ser verificadas automaticamente?',
+        'Kick-off já realizado em 22/05 com Paulo, Stallin, Felipe e Nicolas — usar o que foi alinhado nessa call.'
+      ],
+      contexto: 'Essa é a skill com maior ROI estimado: libera 30-40h/mês do time. Já teve kick-off em 22/05. Prioridade 1 — deve ser a primeira skill construída. O fluxo de oferta pública é o mais padronizado e portanto o mais fácil de automatizar.',
+      sucesso: 'Skill operacional economizando as 30-40h mensais estimadas. Fluxo completo de oferta pública automatizado.'
+    },
+    'task-skill-matriz': {
+      tag: 'Skills a Criar · Prioridade 1',
+      title: 'skill-matriz-decisao-distribuicao',
+      objetivo: 'Construir a automação no HubSpot que roteia cada nova operação para o pipeline correto (pública ou privada) com base nos critérios definidos na task-matriz-decisao.',
+      pontos: [
+        'Dependência: task-matriz-decisao precisa estar concluída e aprovada.',
+        'Critérios de decisão: valor, tipo de investidor, modalidade CVM.',
+        'Integração HubSpot: qual propriedade/campo aciona qual pipeline?',
+        'Notificações automáticas: quem é avisado quando uma operação é roteada?',
+        'Casos de borda e tratamento de exceções.'
+      ],
+      contexto: 'O roteamento manual entre pública e privada cria inconsistências e risco operacional. Automatizar essa decisão é o pré-requisito para escalar a distribuição sem aumentar a equipe.',
+      sucesso: 'Roteamento automático funcionando no HubSpot. Zero operações classificadas manualmente.'
+    },
+    'task-skill-inv': {
+      tag: 'Skills a Criar · Prioridade 2',
+      title: 'skill-mapeamento-investidores',
+      objetivo: 'Construir o repositório dinâmico de perfis de investidores institucionais — uma base de conhecimento que fica atualizada e é consultável por toda a equipe.',
+      pontos: [
+        'Dependência: task-mapeamento-inv precisa estar concluída para ter os dados iniciais.',
+        'Estrutura de cada perfil: nome, tamanho, preferências, taxas, histórico de investimentos na AmFi.',
+        'Como manter atualizado: quem atualiza? Com que frequência? Após cada reunião?',
+        'Como tornar buscável: por tipo de ativo, por tamanho, por canal preferido.',
+        'Integração com CRM para cross-reference com operações.'
+      ],
+      contexto: 'Hoje o conhecimento sobre cada investidor está na cabeça de cada pessoa do time comercial. Centralizar isso cria consistência e permite substituições sem perda de contexto.',
+      sucesso: 'Repositório com perfis de todos os investidores ativos. Consultável pela equipe. Processo de atualização contínua funcionando.'
+    },
+    'task-skill-enxoval': {
+      tag: 'Skills a Criar · Prioridade 2',
+      title: 'skill-enxoval-documental',
+      objetivo: 'Criar a skill que padroniza, centraliza e versiona todos os documentos de oferta — garantindo que a equipe sempre use a versão correta e atualizada.',
+      pontos: [
+        'Dependências: task-enxoval + task-validar-enxoval precisam estar concluídas.',
+        'Sistema de versionamento: como gerenciar versões de cada documento.',
+        'Templates padronizados com identidade visual AmFi.',
+        'Processo de aprovação de novas versões: quem aprova o quê.',
+        'Onde os documentos ficam e como a equipe acessa (Drive, Notion, ou outro).'
+      ],
+      contexto: 'Hoje cada pessoa tem sua própria versão de cada documento, criando inconsistências na comunicação com os investidores. A padronização protege a imagem da AmFi e facilita o onboarding de novos membros do time.',
+      sucesso: 'Um único repositório de documentos padronizados. Processo claro de atualização e aprovação. Toda a equipe usando a mesma versão.'
+    },
+    'task-skill-qa': {
+      tag: 'Skills a Criar · Prioridade 3',
+      title: 'skill-qa-operacoes',
+      objetivo: 'Centralizar o histórico de perguntas e respostas das operações e incorporar as dúvidas recorrentes nos materiais de oferta, reduzindo o tempo de suporte.',
+      pontos: [
+        'Onde estão as perguntas hoje? WhatsApp, email, reuniões — mapear todas as fontes.',
+        'Com que frequência cada pergunta aparece? Quais são as top 10 mais recorrentes?',
+        'Quem responde cada tipo de pergunta? Tem resposta padrão ou varia?',
+        'Incorporação nos materiais: quais FAQs devem entrar nas lâminas e One Pagers?',
+        'Sistema de captura contínua: como novas perguntas entram na base?'
+      ],
+      contexto: 'A equipe de distribuição — especialmente Nicolas — responde as mesmas perguntas repetidamente para cada investidor. Centralizar esse conhecimento economiza tempo, cria consistência e melhora os materiais de oferta com as dúvidas reais do mercado.',
+      sucesso: 'Base de Q&A com as top perguntas documentadas e respondidas. FAQs mais frequentes integradas aos materiais de oferta. Sistema de captura contínua ativo.'
+    }
+  };
+
+  // ── BRIEFING DRAWER ───────────────────────────────────────────
+  const AI_BRIEFINGS_KEY = 'amfi-ai-briefings-v1';
+
+  // Restaura briefings de tasks de IA do localStorage para o objeto BRIEFINGS
+  (function restoreAIBriefings() {
+    const cached = JSON.parse(localStorage.getItem(AI_BRIEFINGS_KEY) || '{}');
+    Object.assign(BRIEFINGS, cached);
+  })();
+
+  function openBriefing(taskId) {
+    // Se não tem briefing e é task de IA, gera com IA
+    if (!BRIEFINGS[taskId]) {
+      const aiTask = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]').find(t => t.id === taskId);
+      if (!aiTask) return;
+      _openDrawerUI(taskId, aiTask.acao, '🤖 Gerado pela IA');
+      document.getElementById('drawerBody').innerHTML =
+        '<div style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--gray-500);padding:8px 0;"><span class="spinner"></span> Gerando briefing...</div>';
+      _generateAIBriefing(taskId, aiTask);
+      return;
+    }
+
+    const b = BRIEFINGS[taskId];
+    _openDrawerUI(taskId, b.title || b.titulo || taskId, b.tag || 'Briefing');
+    _renderBriefingBody(taskId, b);
+  }
+
+  async function _generateAIBriefing(taskId, aiTask) {
+    try {
+      const raw = await window.cowork.askClaude(
+        `Gere um briefing estruturado para esta tarefa do Diego Simoes (DRI de AI na AmFi Finance):\n\nTarefa: "${aiTask.acao}"\nOrigem: ${aiTask.sourceTitle}\nPrazo: ${aiTask.prazo || 'esta semana'}\n\nRetorne SOMENTE JSON válido, sem markdown:\n{"tag":"label curto (ex: E-mail · Paulo David)","title":"${aiTask.acao}","objetivo":"O que precisa ser feito e por quê (2-3 linhas)","pontos":["ponto 1","ponto 2","ponto 3"],"contexto":"Contexto relevante sobre por que essa tarefa existe","sucesso":"Como saber que a tarefa foi concluída"}`,
+        []
+      );
+      const rawText = typeof raw === 'string' ? raw : (raw?.text || JSON.stringify(raw));
+      const match = rawText.match(/\{[\s\S]*\}/);
+      const briefing = JSON.parse(match ? match[0] : rawText);
+
+      // Cacheia no localStorage e no objeto BRIEFINGS
+      const cached = JSON.parse(localStorage.getItem(AI_BRIEFINGS_KEY) || '{}');
+      cached[taskId] = briefing;
+      localStorage.setItem(AI_BRIEFINGS_KEY, JSON.stringify(cached));
+      BRIEFINGS[taskId] = briefing;
+
+      // Atualiza o drawer se ainda estiver aberto para este taskId
+      const drawerTitle = document.getElementById('drawerTitle');
+      if (drawerTitle && drawerTitle.textContent.includes(aiTask.acao.substring(0, 20))) {
+        document.getElementById('drawerTag').textContent = briefing.tag;
+        _renderBriefingBody(taskId, briefing);
+      }
+    } catch(e) {
+      const body = document.getElementById('drawerBody');
+      if (body) body.innerHTML = `<div style="font-size:13px;color:var(--red);padding:8px 0;">⚠️ Erro ao gerar briefing: ${e.message || String(e)}</div>`;
+    }
+  }
+
+  function _openDrawerUI(taskId, title, tag) {
+    document.getElementById('drawerTag').textContent = tag;
+    document.getElementById('drawerTitle').textContent = title;
+    document.getElementById('drawerOverlay').classList.add('open');
+    document.getElementById('briefingDrawer').classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function _renderBriefingBody(taskId, b) {
+    const calBadge = document.getElementById('cal-' + taskId);
+    const body = document.getElementById('drawerBody');
+    body.innerHTML = `
+      <div class="briefing-section">
+        <div class="briefing-section-title">Objetivo</div>
+        <p class="briefing-text">${b.objetivo}</p>
+      </div>
+      <div class="briefing-section">
+        <div class="briefing-section-title">Pontos-chave para cobrir</div>
+        <ul class="briefing-list">${(b.pontos||[]).map((p, i) => `<li id="bpoint-${taskId}-${i}">${p}</li>`).join('')}</ul>
+      </div>
+      <div class="briefing-section">
+        <div class="briefing-section-title">Contexto</div>
+        <div class="briefing-context">${b.contexto}</div>
+      </div>
+      <div class="briefing-section">
+        <div class="briefing-section-title">Critério de sucesso</div>
+        <div class="briefing-success">✅ ${b.sucesso}</div>
+      </div>
+      <div class="briefing-section" id="transcript-section-${taskId}">
+        <div class="briefing-section-title">O que aconteceu na reunião</div>
+        <div id="transcript-result-${taskId}"></div>
+      </div>`;
+    setTimeout(() => initTranscriptSection(taskId), 50);
+  }
+
+  // Mantém compatibilidade: tasks hardcoded usam este fluxo antigo mas
+  // agora delegam para as funções novas acima
+  function _legacyOpenBriefing(taskId) {
+    const b = BRIEFINGS[taskId];
+    if (!b) return;
+
+    document.getElementById('drawerTag').textContent = b.tag;
+    document.getElementById('drawerTitle').textContent = b.title;
+
+    // Check if task has a past/scheduled event badge
+    const calBadge = document.getElementById('cal-' + taskId);
+    const hasRealizadoBadge = calBadge && calBadge.textContent.includes('Realizado');
+    const hasAgendadoBadge  = calBadge && calBadge.textContent.includes('Agendado');
+    const calInfo = calBadge ? calBadge.textContent : '';
+
+    const body = document.getElementById('drawerBody');
+    body.innerHTML = `
+      <div class="briefing-section">
+        <div class="briefing-section-title">Objetivo</div>
+        <p class="briefing-text">${b.objetivo}</p>
+      </div>
+      <div class="briefing-section">
+        <div class="briefing-section-title">Pontos-chave para cobrir</div>
+        <ul class="briefing-list">${b.pontos.map((p, i) => `<li id="bpoint-${taskId}-${i}">${p}</li>`).join('')}</ul>
+      </div>
+      <div class="briefing-section">
+        <div class="briefing-section-title">Contexto</div>
+        <div class="briefing-context">${b.contexto}</div>
+      </div>
+      <div class="briefing-section">
+        <div class="briefing-section-title">Critério de sucesso</div>
+        <div class="briefing-success">✅ ${b.sucesso}</div>
+      </div>
+      <div class="briefing-section" id="transcript-section-${taskId}">
+        <div class="briefing-section-title">O que aconteceu na reunião</div>
+        <div id="transcript-result-${taskId}"></div>
+      </div>
+    `;
+
+    document.getElementById('drawerOverlay').classList.add('open');
+    document.getElementById('briefingDrawer').classList.add('open');
+    document.body.style.overflow = 'hidden';
+    // Populate transcript section automatically (after DOM renders)
+    setTimeout(() => initTranscriptSection(taskId), 50);
+  }
+
+  // ── TRANSCRIPT ANALYSIS ───────────────────────────────────────
+  // ── AUTO TRANSCRIPT ANALYSIS ─────────────────────────────────
+  const TRANSCRIPT_CACHE_KEY = 'amfi-transcript-v2';
+  const AI_TASKS_KEY = 'amfi-ai-tasks-v1';
+  const MANUAL_REALIZADO_KEY = 'amfi-manual-realizado-v1';
+
+  // Called after calendar loads — background-analyze all "Realizado" tasks
+  async function autoAnalyzeRealizado() {
+    // Apply manual realizado marks to badges first
+    applyManualRealizado();
+    const realizados = [...document.querySelectorAll('.cal-badge.done-cal')];
+    for (const badge of realizados) {
+      const taskId = badge.id.replace('cal-', '');
+      const b = BRIEFINGS[taskId];
+      if (!b) continue;
+      const eventKey = badge.getAttribute('data-event-key') || taskId;
+      const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+      if (cache[taskId]?.eventKey === eventKey) continue; // already analyzed for this event
+      await analyzeAndCache(taskId, eventKey);
+      await new Promise(r => setTimeout(r, 500)); // small gap between tasks
+    }
+  }
+
+  // Mark a task as manually realizado (for meetings without Calendar events)
+  function markAsRealizado(taskId, dateStr) {
+    const stored = JSON.parse(localStorage.getItem(MANUAL_REALIZADO_KEY) || '{}');
+    const eventKey = 'manual-' + taskId + '-' + Date.now();
+    stored[taskId] = { dateStr: dateStr || 'hoje', eventKey };
+    localStorage.setItem(MANUAL_REALIZADO_KEY, JSON.stringify(stored));
+    applyManualRealizado();
+    // Trigger analysis immediately
+    setTimeout(() => analyzeAndCache(taskId, eventKey), 100);
+    // Refresh the transcript section if drawer is open
+    setTimeout(() => initTranscriptSection(taskId), 200);
+  }
+
+  function applyManualRealizado() {
+    const stored = JSON.parse(localStorage.getItem(MANUAL_REALIZADO_KEY) || '{}');
+    Object.entries(stored).forEach(([taskId, { dateStr, eventKey }]) => {
+      const calEl = document.getElementById('cal-' + taskId);
+      if (!calEl) return;
+      // Only override if not already matched by real calendar
+      if (!calEl.classList.contains('done-cal') && !calEl.classList.contains('scheduled')) {
+        calEl.style.display = '';
+        calEl.className = 'cal-badge done-cal';
+        calEl.textContent = '✅ Realizado: ' + dateStr;
+        calEl.setAttribute('data-event-key', eventKey);
+        // Auto-marca como concluída (respeita desmarques manuais)
+        autoCompleteFromCalendar(taskId);
+      }
+    });
+  }
+
+  // Core: search Drive, read transcript, analyze with AI, cache result
+  async function analyzeAndCache(taskId, eventKey) {
+    const b = BRIEFINGS[taskId];
+    if (!b) return;
+    try {
+      // 1. Search Drive for transcript
+      const driveTerms = (b.driveSearch || b.title).toLowerCase().split(' ').filter(w => w.length > 3);
+      const kw1 = driveTerms[0] || '';
+      const kw2 = driveTerms[1] || '';
+      const query = kw2
+        ? `fullText contains '${kw1}' and fullText contains '${kw2}'`
+        : `fullText contains '${kw1}'`;
+
+      const searchResult = await window.cowork.callMcpTool(
+        'mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__search_files',
+        { query, pageSize: 10 }
+      );
+
+      let files = [];
+      if (searchResult?.content && Array.isArray(searchResult.content)) {
+        try { const t = searchResult.content.find(c=>c.type==='text')?.text; if(t){const p=JSON.parse(t);files=p.files||p||[];} } catch(e){}
+      }
+      if (!files.length && searchResult?.files) files = searchResult.files;
+      else if (!files.length && Array.isArray(searchResult)) files = searchResult;
+
+      const scoreFile = f => {
+        const name = (f.title || f.name || '').toLowerCase();
+        let s = 0;
+        if (name.includes('anotaç') || name.includes('gemini') || name.includes('transcri') || name.includes('reunião')) s += 3;
+        driveTerms.forEach(k => { if (name.includes(k)) s += 2; });
+        return s;
+      };
+      const file = [...files].sort((a, b) => scoreFile(b) - scoreFile(a))[0];
+      if (!file) return; // no transcript found — silent fail, try again next refresh
+
+      // 2. Read file
+      const fileResult = await window.cowork.callMcpTool(
+        'mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__read_file_content',
+        { fileId: file.id }
+      );
+
+      let content = '';
+      if (typeof fileResult === 'string') content = fileResult;
+      else if (fileResult?.fileContent) content = fileResult.fileContent;
+      else if (fileResult?.content && typeof fileResult.content === 'string') content = fileResult.content;
+      else if (fileResult?.content && Array.isArray(fileResult.content)) {
+        try { const t = fileResult.content.find(c=>c.type==='text')?.text; if(t) content = t; } catch(e){}
+      }
+      else if (fileResult?.text) content = fileResult.text;
+      if (content.length < 50) return;
+
+      // 3. Analyze with AI — structured JSON output
+      const pontosStr = b.pontos.map((p, i) => `${i+1}. ${p}`).join('\n');
+      const raw = await window.cowork.askClaude(
+        `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise a transcrição para a task "${b.title}".
+
+PONTOS-CHAVE:
+${pontosStr}
+
+CRITÉRIO DE SUCESSO: ${b.sucesso}
+
+Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
+{
+  "resumo": "2-3 linhas objetivas sobre o que foi decidido/discutido",
+  "cobertura": [
+    {"ponto": "texto resumido do ponto (máx 55 chars)", "status": "coberto|parcial|nao_abordado", "obs": "1 linha"}
+  ],
+  "proximos_passos": [
+    {"dono": "PrimeiroNome", "acao": "ação concreta e objetiva", "prazo": "hoje|esta semana|próxima semana|mês"}
+  ],
+  "status_task": "Sim|Parcialmente|Não"
+}`,
+        [{ type: 'text', text: content.substring(0, 10000) }]
+      );
+
+      // Normalise askClaude response — may return object or string
+      let rawText = raw;
+      if (typeof raw !== 'string') {
+        rawText = raw?.text || raw?.content || raw?.result || JSON.stringify(raw);
+      }
+      if (typeof rawText !== 'string') rawText = String(rawText || '');
+
+      let analysis;
+      try {
+        // Extract JSON even if wrapped in markdown code fences
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        analysis = JSON.parse(jsonMatch ? jsonMatch[0] : rawText.replace(/```json\n?|\n?```/g, '').trim());
+      } catch(e) {
+        analysis = { raw: rawText }; // fallback to raw text string
+      }
+
+      // 4. Cache
+      const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+      cache[taskId] = { eventKey, analysis, fileName: file.title || file.name, timestamp: Date.now() };
+      localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
+
+      // 5. Create AI tasks from next steps
+      if (analysis.proximos_passos?.length) createAITasks(taskId, b.title, analysis.proximos_passos);
+
+      // 6. Refresh briefing if open for this task
+      const resultEl = document.getElementById('transcript-result-' + taskId);
+      if (resultEl) renderAnalysis(taskId, resultEl);
+
+    } catch(e) { console.warn('analyzeAndCache failed for', taskId, e); }
+  }
+
+  // Render cached analysis into a DOM element
+  function renderAnalysis(taskId, container) {
+    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+    const entry = cache[taskId];
+    if (!entry) {
+      container.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Analisando transcrição...</div>';
+      return;
+    }
+    const a = entry.analysis;
+    if (a.raw) {
+      container.innerHTML = `<div style="font-size:12px;line-height:1.7;color:var(--gray-700);background:#f8fafc;border-radius:8px;padding:14px;white-space:pre-wrap;">${a.raw}</div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:10px;color:var(--gray-500);">📄 ${entry.fileName}</span>
+          <button class="btn-ghost" style="font-size:10px;padding:4px 10px;" onclick="clearAndReanalyze('${taskId}')">🔄 Reanalisar</button>
+        </div>`;
+      return;
+    }
+
+    const icoStatus = { coberto:'✅', parcial:'⚠️', nao_abordado:'❌' };
+    const icoTask   = { Sim:'✅ Concluída', Parcialmente:'⚠️ Parcial', Não:'❌ Pendente' };
+    const age = Math.round((Date.now() - entry.timestamp) / 60000);
+    const ageStr = age < 2 ? 'agora mesmo' : age < 60 ? `${age}min atrás` : `${Math.round(age/60)}h atrás`;
+
+    const pontosHtml = (a.cobertura || []).map(p => `
+      <div style="display:flex;gap:8px;margin-bottom:8px;font-size:12px;align-items:flex-start;">
+        <span style="flex-shrink:0;font-size:14px;">${icoStatus[p.status]||'⚠️'}</span>
+        <div><strong>${p.ponto}</strong><br><span style="color:var(--gray-500);font-size:11px;">${p.obs}</span></div>
+      </div>`).join('');
+
+    const passosHtml = (a.proximos_passos || []).map(p => `
+      <div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;align-items:flex-start;">
+        <span style="flex-shrink:0;color:var(--magenta);font-weight:800;">→</span>
+        <div><strong>[${p.dono}]</strong> ${p.acao} <span style="background:var(--gray-100);border-radius:4px;padding:1px 7px;font-size:10px;color:var(--gray-700);margin-left:4px;">${p.prazo}</span></div>
+      </div>`).join('');
+
+    container.innerHTML = `
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;border:1px solid var(--gray-300);">
+        <p style="font-size:12px;color:var(--gray-700);line-height:1.65;font-style:italic;margin-bottom:14px;">${a.resumo}</p>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--gray-500);margin-bottom:9px;">Cobertura dos pontos</div>
+        ${pontosHtml}
+        ${passosHtml ? `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--gray-500);margin:13px 0 9px;">Próximos passos → criados como tasks</div>${passosHtml}` : ''}
+        <div style="margin-top:13px;padding-top:10px;border-top:1px solid var(--gray-300);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+          <span style="font-size:12px;font-weight:700;">${icoTask[a.status_task]||'⚠️ Parcial'}</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:10px;color:var(--gray-500);">📄 ${entry.fileName} · ${ageStr}</span>
+            <button class="btn-ghost" style="font-size:10px;padding:3px 9px;" onclick="clearAndReanalyze('${taskId}')">🔄</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // Called on briefing open — decides what to show in transcript section
+  function initTranscriptSection(taskId) {
+    const resultEl = document.getElementById('transcript-result-' + taskId);
+    if (!resultEl) return;
+    const badge = document.getElementById('cal-' + taskId);
+    const isRealizado = badge?.classList.contains('done-cal');
+    const isAgendado  = badge?.classList.contains('scheduled');
+
+    if (isAgendado) {
+      resultEl.innerHTML = `<div class="briefing-context">Reunião agendada: <strong>${badge.textContent}</strong>.<br>A análise de transcrição estará disponível após a reunião acontecer.</div>`;
+      return;
+    }
+    if (!isRealizado) {
+      resultEl.innerHTML = `
+        <div style="font-size:12px;color:var(--gray-500);line-height:1.6;">Nenhuma reunião detectada no calendário para esta task.
+          <br>Se a reunião já aconteceu sem evento no Calendar:</div>
+        <button class="btn-ghost" style="font-size:12px;padding:7px 13px;margin-top:10px;" onclick="markAsRealizado('${taskId}')">✅ Marcar reunião como realizada e buscar transcrição</button>`;
+      return;
+    }
+    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+    const eventKey = badge.getAttribute('data-event-key') || taskId;
+    if (cache[taskId]?.eventKey === eventKey) {
+      renderAnalysis(taskId, resultEl);
+    } else {
+      resultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Buscando e analisando transcrição no Drive...</div>';
+      analyzeAndCache(taskId, eventKey);
+    }
+  }
+
+  function clearAndReanalyze(taskId) {
+    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+    delete cache[taskId];
+    localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
+    const resultEl = document.getElementById('transcript-result-' + taskId);
+    if (resultEl) resultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Reanalisando...</div>';
+    const badge = document.getElementById('cal-' + taskId);
+    analyzeAndCache(taskId, badge?.getAttribute('data-event-key') || taskId);
+  }
+
+  // ── AI-GENERATED TASKS ────────────────────────────────────────
+  function createAITasks(sourceTaskId, sourceTitle, proximos_passos) {
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    const other = stored.filter(t => t.sourceTaskId !== sourceTaskId);
+    const newTasks = proximos_passos.map((p, i) => ({
+      id: `ai-${sourceTaskId}-${i}`,
+      sourceTaskId, sourceTitle,
+      dono: p.dono, acao: p.acao, prazo: p.prazo,
+      created: Date.now(),
+      done: stored.find(t => t.id === `ai-${sourceTaskId}-${i}`)?.done || false
+    }));
+    localStorage.setItem(AI_TASKS_KEY, JSON.stringify([...other, ...newTasks]));
+    renderAITasks();
+    updateStats();
+  }
+
+  function toggleAITask(id) {
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    const t = stored.find(t => t.id === id);
+    if (t) t.done = !t.done;
+    localStorage.setItem(AI_TASKS_KEY, JSON.stringify(stored));
+    renderAITasks();
+    updateStats();
+  }
+
+  function dismissAITask(id) {
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    localStorage.setItem(AI_TASKS_KEY, JSON.stringify(stored.filter(t => t.id !== id)));
+    renderAITasks();
+    updateStats();
+  }
+
+  function renderAITasks() {
+    // Remove tasks de IA injetadas anteriormente para evitar duplicatas
+    document.querySelectorAll('[data-ai-task="true"]').forEach(el => el.remove());
+
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    if (!stored.length) { updateStats(countDone()); return; }
+
+    // Mapeia prazo para seção existente
+    const getListId = (prazo) => {
+      if (!prazo) return 'list-semana';
+      const p = prazo.toLowerCase();
+      if (p.includes('hoje')) return 'list-urgente';
+      if (p.includes('semana')) return 'list-semana';
+      return 'list-proximas'; // próxima semana, mês, etc.
+    };
+
+    stored.forEach(t => {
+      const listEl = document.getElementById(getListId(t.prazo));
+      if (!listEl) return;
+      const card = document.createElement('div');
+      card.className = 'card blue' + (t.done ? ' done' : '');
+      card.id = t.id;
+      card.setAttribute('data-ai-task', 'true');
+      card.style.position = 'relative';
+      card.innerHTML = `
+        <div class="check-wrap"><div class="check-box ${t.done?'checked':''}" onclick="toggleAITask('${t.id}')"></div></div>
+        <div class="card-content">
+          <div class="card-name" onclick="openBriefing('${t.id}')" title="Clique para ver o briefing">${t.acao} <span style="font-size:11px;opacity:0.45;">📋</span></div>
+          <div class="card-desc" style="font-size:11px;color:var(--gray-500);">🤖 Gerado pela IA · De: ${t.sourceTitle}</div>
+          <div class="card-meta">
+            <span class="badge b-magenta" style="font-size:9px;">🤖 IA</span>
+            <span class="badge b-gray">${t.prazo || 'esta semana'}</span>
+          </div>
+        </div>
+        <button onclick="dismissAITask('${t.id}')" title="Dispensar" style="position:absolute;top:8px;right:8px;background:none;border:none;cursor:pointer;font-size:14px;color:var(--gray-500);line-height:1;opacity:0.5;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.5">✕</button>`;
+      listEl.appendChild(card);
+    });
+
+    updateStats(countDone());
+  }
+
+  function countDone() {
+    let n = 0;
+    document.querySelectorAll('.card[id]').forEach(card => {
+      if (loadDone()[card.id] || card.querySelector('.check-box.checked')) n++;
+    });
+    return n;
+  }
+
+  function closeBriefing() {
+    document.getElementById('drawerOverlay').classList.remove('open');
+    document.getElementById('briefingDrawer').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  // Wire up card-name clicks to open briefing
+  document.querySelectorAll('.card[id]').forEach(card => {
+    const nameEl = card.querySelector('.card-name');
+    if (nameEl && BRIEFINGS[card.id]) {
+      nameEl.addEventListener('click', () => openBriefing(card.id));
+      // Add visual hint
+      nameEl.title = 'Clique para ver o briefing detalhado';
+      // Add small icon
+      const icon = document.createElement('span');
+      icon.textContent = ' 📋';
+      icon.style.cssText = 'font-size:11px;opacity:0.45;';
+      nameEl.appendChild(icon);
+    }
+  });
+
+  // ── INIT ──────────────────────────────────────────────────────
+  applyState(loadDone());
+
+  // Pre-mark task-rubia as realizado (meeting happened 22/05 às 11h, no Calendar event)
+  (function seedManualRubia() {
+    const stored = JSON.parse(localStorage.getItem(MANUAL_REALIZADO_KEY) || '{}');
+    if (!stored['task-rubia']) {
+      stored['task-rubia'] = { dateStr: 'sex., 22/05 11:00', eventKey: 'manual-rubia-20260522' };
+      localStorage.setItem(MANUAL_REALIZADO_KEY, JSON.stringify(stored));
+    }
+  })();
+
+  // Clear any corrupted transcript cache entries (where raw is an object, not a string)
+  (function sanitizeTranscriptCache() {
+    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+    let changed = false;
+    Object.keys(cache).forEach(k => {
+      const a = cache[k]?.analysis;
+      if (a && a.raw && typeof a.raw !== 'string') { delete cache[k]; changed = true; }
+      // Also clear entries with no resumo and no raw (invalid JSON parse result)
+      if (a && !a.raw && !a.resumo) { delete cache[k]; changed = true; }
+    });
+    if (changed) localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
+  })();
+
+  // Restore AI-generated tasks and manual badges immediately (no API needed)
+  renderAITasks();
+  applyManualRealizado();
+
+  function waitForCowork(attempts, cb) {
+    if (attempts <= 0) { cb(false); return; }
+    if (window.cowork && typeof window.cowork.callMcpTool === 'function') { cb(true); }
+    else { setTimeout(() => waitForCowork(attempts - 1, cb), 400); }
+  }
+
+  waitForCowork(25, (ready) => {
+    if (ready) {
+      loadCalendarStatus();
+      checkDrive();
+    } else {
+      document.getElementById('calStatusBar').className = 'cal-status-bar';
+      document.getElementById('calStatusBar').textContent = 'Clique em "Verificar Drive" para atualizar.';
+      document.querySelectorAll('.cal-badge').forEach(el => el.style.display = 'none');
+      document.getElementById('lastUpdate').textContent = 'Pronto — clique em Fazer Varredura para atualizar.';
+      // Still apply manual marks even without API
+      applyManualRealizado();
+      // Restore cached AI analysis
+      document.querySelectorAll('.cal-badge.done-cal').forEach(badge => {
+        const taskId = badge.id.replace('cal-', '');
+        const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+        if (!cache[taskId]) analyzeAndCache(taskId, badge.getAttribute('data-event-key') || taskId);
+      });
+    }
+  });
+</script>
+</body>
+</html>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       

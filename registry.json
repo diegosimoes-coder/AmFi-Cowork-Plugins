@@ -1,13 +1,13 @@
 {
   "name": "AmFi Cowork Plugins",
   "description": "Plugins oficiais da AmFi Finance para o Cowork",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "plugins": [
     {
       "id": "central-demandas",
       "name": "Central de Demandas",
       "description": "Transforma seus e-mails, reuniões e arquivos do Drive em uma lista de tarefas organizada por urgência, com briefings detalhados e análise automática de transcrições.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": "AmFi Finance",
       "path": "plugins/central-demandas/plugin.json",
       "requiredConnectors": ["Gmail", "Google Drive", "Google Calendar"],
