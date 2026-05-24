@@ -8,13 +8,17 @@
     "mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__search_files",
     "mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__read_file_content",
     "mcp__2bcf1cbe-23ad-4d23-8641-4b2f88e18a8b__list_events",
-    "mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads"
+    "mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads",
+    "mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-search",
+    "mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-fetch"
   ],
   "mcpServerNames": [
     "Google Drive",
     "Google Drive",
     "Google Calendar",
-    "Gmail"
+    "Gmail",
+    "Notion",
+    "Notion"
   ]
 }
 </script>
@@ -1254,23 +1258,56 @@
         return s;
       };
       const file = [...files].sort((a, b) => scoreFile(b) - scoreFile(a))[0];
-      if (!file) return; // no transcript found — silent fail, try again next refresh
+      let driveContent = '';
+      let notionContent = '';
+      const sources = [];
 
-      // 2. Read file
-      const fileResult = await window.cowork.callMcpTool(
-        'mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__read_file_content',
-        { fileId: file.id }
-      );
-
-      let content = '';
-      if (typeof fileResult === 'string') content = fileResult;
-      else if (fileResult?.fileContent) content = fileResult.fileContent;
-      else if (fileResult?.content && typeof fileResult.content === 'string') content = fileResult.content;
-      else if (fileResult?.content && Array.isArray(fileResult.content)) {
-        try { const t = fileResult.content.find(c=>c.type==='text')?.text; if(t) content = t; } catch(e){}
+      // 2a. Lê do Drive (se encontrou arquivo)
+      if (file) {
+        try {
+          const fileResult = await window.cowork.callMcpTool(
+            'mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__read_file_content',
+            { fileId: file.id }
+          );
+          if (typeof fileResult === 'string') driveContent = fileResult;
+          else if (fileResult?.fileContent) driveContent = fileResult.fileContent;
+          else if (fileResult?.content && typeof fileResult.content === 'string') driveContent = fileResult.content;
+          else if (fileResult?.content && Array.isArray(fileResult.content)) {
+            try { const t = fileResult.content.find(c=>c.type==='text')?.text; if(t) driveContent = t; } catch(e){}
+          }
+          else if (fileResult?.text) driveContent = fileResult.text;
+          if (driveContent.length >= 50) sources.push('Drive: ' + (file.title || file.name));
+        } catch(e) { console.warn('Drive read failed', e); }
       }
-      else if (fileResult?.text) content = fileResult.text;
-      if (content.length < 50) return;
+
+      // 2b. Busca SEMPRE no Notion "Reuniões - Otallin" (em paralelo, independente do Drive)
+      try {
+        const notionRes = await window.cowork.callMcpTool(
+          'mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-search',
+          { query: b.driveSearch || b.title, data_source_url: 'collection://361061f2-b2ad-80a2-9d82-000b44dcd74a', page_size: 3, max_highlight_length: 0 }
+        );
+        let notionResults = notionRes?.results || [];
+        if (!notionResults.length && notionRes?.content) {
+          try { const nt = notionRes.content.find(c=>c.type==='text')?.text; if(nt) notionResults = JSON.parse(nt).results || []; } catch(e2){}
+        }
+        if (notionResults.length) {
+          const notionPage = await window.cowork.callMcpTool(
+            'mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-fetch',
+            { id: notionResults[0].id }
+          );
+          notionContent = notionPage?.text || '';
+          if (notionContent.length >= 50) sources.push('Notion: ' + (notionResults[0].title || 'Reunião'));
+        }
+      } catch(notionErr) { console.warn('Notion search failed', notionErr); }
+
+      // 2c. Combina conteúdo das duas fontes
+      const contentParts = [];
+      if (driveContent.length >= 50) contentParts.push('=== FONTE: GOOGLE DRIVE ===\n' + driveContent);
+      if (notionContent.length >= 50) contentParts.push('=== FONTE: NOTION (Reuniões - Otallin) ===\n' + notionContent);
+      const content = contentParts.join('\n\n');
+      const sourceLabel = sources.join(' + ') || '';
+
+      if (content.length < 50) return; // nenhuma transcrição encontrada em nenhuma fonte
 
       // 3. Analyze with AI — structured JSON output
       const pontosStr = b.pontos.map((p, i) => `${i+1}. ${p}`).join('\n');
@@ -1314,7 +1351,7 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
 
       // 4. Cache
       const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
-      cache[taskId] = { eventKey, analysis, fileName: file.title || file.name, timestamp: Date.now() };
+      cache[taskId] = { eventKey, analysis, fileName: sourceLabel, timestamp: Date.now() };
       localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
 
       // 5. Create AI tasks from next steps
@@ -1541,39 +1578,4 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
       // Also clear entries with no resumo and no raw (invalid JSON parse result)
       if (a && !a.raw && !a.resumo) { delete cache[k]; changed = true; }
     });
-    if (changed) localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
-  })();
-
-  // Restore AI-generated tasks and manual badges immediately (no API needed)
-  renderAITasks();
-  applyManualRealizado();
-
-  function waitForCowork(attempts, cb) {
-    if (attempts <= 0) { cb(false); return; }
-    if (window.cowork && typeof window.cowork.callMcpTool === 'function') { cb(true); }
-    else { setTimeout(() => waitForCowork(attempts - 1, cb), 400); }
-  }
-
-  waitForCowork(25, (ready) => {
-    if (ready) {
-      loadCalendarStatus();
-      checkDrive();
-    } else {
-      document.getElementById('calStatusBar').className = 'cal-status-bar';
-      document.getElementById('calStatusBar').textContent = 'Clique em "Verificar Drive" para atualizar.';
-      document.querySelectorAll('.cal-badge').forEach(el => el.style.display = 'none');
-      document.getElementById('lastUpdate').textContent = 'Pronto — clique em Fazer Varredura para atualizar.';
-      // Still apply manual marks even without API
-      applyManualRealizado();
-      // Restore cached AI analysis
-      document.querySelectorAll('.cal-badge.done-cal').forEach(badge => {
-        const taskId = badge.id.replace('cal-', '');
-        const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
-        if (!cache[taskId]) analyzeAndCache(taskId, badge.getAttribute('data-event-key') || taskId);
-      });
-    }
-  });
-</script>
-</body>
-</html>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+  

@@ -1,5 +1,8 @@
 # Changelog — Central de Demandas
 
+## v1.2.0 (2026-05-24)
+- **Notion integrado** — análise de transcrições busca Drive + Notion "Reuniões - Otallin" sempre em paralelo, combinando conteúdo das duas fontes
+
 ## v1.1.0 (2026-05-24)
 - **Varredura combinada** — botão "Fazer Varredura" escaneia Drive + Gmail em paralelo (antes era só Drive)
 - **Query VIP no Gmail** — e-mails de remetentes-chave (CEO, diretoria) sempre capturados independente do status de leitura
