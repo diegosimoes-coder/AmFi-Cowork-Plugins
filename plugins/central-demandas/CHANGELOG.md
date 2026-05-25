@@ -1,5 +1,11 @@
 # Changelog — Central de Demandas
 
+## v1.6.0 (2026-05-24)
+- **Anti-duplicata** — tasks existentes injetadas no prompt dos 3 scanners (Drive/Email/Notion) para a IA não gerar tasks já cadastradas
+- **Merge por similaridade** — `createAITasks` usa comparação fuzzy em vez de igualdade exata para reconhecer tasks reformuladas
+- **Limpeza on-init** — duplicatas acumuladas no localStorage são removidas automaticamente na abertura
+- **One-time clear** — AI tasks corrompidas/duplicadas apagadas de vez na próxima abertura
+
 ## v1.5.0 (2026-05-24)
 - **Assunto do e-mail salvo nas AI tasks** — cada task gerada por e-mail guarda o assunto original para busca precisa ao verificar encerramento
 - **Resolução de e-mail usa subject exato** — ao abrir drawer de task concluída, busca `subject:"..."` no Gmail em vez de keywords genéricas

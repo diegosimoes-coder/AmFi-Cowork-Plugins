@@ -738,7 +738,8 @@
           (f.contentSnippet ? '\n' + f.contentSnippet.substring(0, 500) : '')
         ).join('\n\n---\n\n');
         driveResult = await window.cowork.askClaude(
-          'Você é o assistente do Diego Simoes, DRI de AI na AmFi. Analise os arquivos da pasta Direcionamentos. Extraia APENAS ações concretas para o Diego: o que ele precisa fazer, prazos, urgências. Cada ação deve começar com →. Se não houver nada acionável, diga "Nenhuma nova demanda no Drive."\n\n' + summary, []
+          'Você é o assistente do Diego Simoes, DRI de AI na AmFi. Analise os arquivos da pasta Direcionamentos. Extraia APENAS ações concretas para o Diego: o que ele precisa fazer, prazos, urgências. Cada ação deve começar com →. Se não houver nada acionável, diga "Nenhuma nova demanda no Drive."' +
+          getExistingTasksContext() + '\n\nARQUIVOS:\n' + summary, []
         );
       } else {
         driveResult = 'Nenhum arquivo novo nas últimas 24h.';
@@ -772,7 +773,8 @@
         }).join('\n\n---\n\n');
 
         emailResult = await window.cowork.askClaude(
-          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Cada e-mail tem tags [AmFi] ou [Externa] e [ASSUNTO: ...]. Para cada ação use o formato: → [AmFi][ASSUNTO: assunto original] ação concreta  ou  → [Externa][ASSUNTO: assunto original] ação concreta. Preserve SEMPRE o [ASSUNTO: ...] exatamente como aparece no e-mail de origem. Ignore informativos sem ação. Se não houver ações, diga "Nenhuma ação pendente."\n\nE-MAILS:\n${emailSummary}`, []
+          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Cada e-mail tem tags [AmFi] ou [Externa] e [ASSUNTO: ...]. Para cada ação use o formato: → [AmFi][ASSUNTO: assunto original] ação concreta  ou  → [Externa][ASSUNTO: assunto original] ação concreta. Preserve SEMPRE o [ASSUNTO: ...] exatamente como aparece no e-mail de origem. Ignore informativos sem ação. Se não houver ações, diga "Nenhuma ação pendente."` +
+          getExistingTasksContext() + `\n\nE-MAILS:\n${emailSummary}`, []
         );
 
         // Transformar ações em tasks na seção de IA
@@ -825,7 +827,8 @@
         }))).join('\n\n---\n\n');
 
         notionResult = await window.cowork.askClaude(
-          `Você é o assistente do Diego Simoes. Analise estas anotações do Notion (Reuniões - Otallin) e extraia APENAS ações concretas pendentes para o Diego. Cada ação deve começar com →. Se não houver nada acionável, diga "Nenhuma nova demanda no Notion."\n\n${notionContent}`, []
+          `Você é o assistente do Diego Simoes. Analise estas anotações do Notion (Reuniões - Otallin) e extraia APENAS ações concretas pendentes para o Diego. Cada ação deve começar com →. Se não houver nada acionável, diga "Nenhuma nova demanda no Notion."` +
+          getExistingTasksContext() + `\n\nNOTION:\n${notionContent}`, []
         );
 
         const notionText = extractText(notionResult);
@@ -1315,6 +1318,9 @@
 
   // Core: search Drive, read transcript, analyze with AI, cache result
   async function analyzeAndCache(taskId, eventKey) {
+    // Não analisar transcrição para tasks de e-mail — elas usam resolveEmailTask
+    const card = document.getElementById(taskId);
+    if (card?.getAttribute('data-tipo') === 'email') return;
     const b = BRIEFINGS[taskId];
     if (!b) return;
     try {
@@ -1513,10 +1519,4 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
     const badge = document.getElementById('cal-' + taskId);
     const isRealizado = badge?.classList.contains('done-cal');
     const isAgendado  = badge?.classList.contains('scheduled');
-    const isDone = !!(loadDone()[taskId] || card?.querySelector('.check-box.checked'));
-    const titleEl = document.getElementById('encerramentoTitle-' + taskId);
-
-    // ── TIPO EMAIL ────────────────────────────────────────────────
-    if (tipo === 'email') {
-      if (isDone) {
-        if
+    const isDone = !!(loadDone()[taskId] || ca
