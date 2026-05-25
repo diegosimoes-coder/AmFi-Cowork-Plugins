@@ -1519,4 +1519,381 @@ Retorne SOMENTE JSON válido, sem markdown, sem texto fora do JSON:
     const badge = document.getElementById('cal-' + taskId);
     const isRealizado = badge?.classList.contains('done-cal');
     const isAgendado  = badge?.classList.contains('scheduled');
-    const isDone = !!(loadDone()[taskId] || ca
+    const isDone = !!(loadDone()[taskId] || card?.querySelector('.check-box.checked'));
+    const titleEl = document.getElementById('encerramentoTitle-' + taskId);
+
+    // ── TIPO EMAIL ────────────────────────────────────────────────
+    if (tipo === 'email') {
+      if (isDone) {
+        if (titleEl) titleEl.textContent = 'Como foi encerrada';
+        resolveEmailTask(taskId, resultEl);
+      } else {
+        if (titleEl) titleEl.textContent = 'Encerramento';
+        resultEl.innerHTML = `<div style="font-size:12px;color:var(--gray-500);line-height:1.6;">📬 Aguardando envio ou recebimento de e-mail.<br>Quando encerrada, marque como concluída — o contexto aparecerá aqui automaticamente.</div>`;
+      }
+      return;
+    }
+
+    // ── TIPO REUNIÃO (padrão) ─────────────────────────────────────
+    if (isAgendado) {
+      if (titleEl) titleEl.textContent = 'Reunião agendada';
+      resultEl.innerHTML = `<div class="briefing-context">Reunião agendada: <strong>${badge.textContent}</strong>.<br>A análise de transcrição estará disponível após a reunião acontecer.</div>`;
+      return;
+    }
+    if (isRealizado) {
+      if (titleEl) titleEl.textContent = 'O que aconteceu na reunião';
+      const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+      const eventKey = badge.getAttribute('data-event-key') || taskId;
+      if (cache[taskId]?.eventKey === eventKey) {
+        renderAnalysis(taskId, resultEl);
+      } else {
+        resultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Buscando e analisando transcrição no Drive...</div>';
+        analyzeAndCache(taskId, eventKey);
+      }
+      return;
+    }
+
+    // ── SEM EVENTO NO CALENDAR ────────────────────────────────────
+    if (isDone) {
+      // Task concluída manualmente, sem reunião detectada
+      if (titleEl) titleEl.textContent = 'Como foi encerrada';
+      resolveManualTask(taskId, resultEl);
+    } else {
+      if (titleEl) titleEl.textContent = 'Encerramento';
+      resultEl.innerHTML = `
+        <div style="font-size:12px;color:var(--gray-500);line-height:1.6;">Nenhuma reunião detectada no calendário para esta task.
+          <br>Se a reunião já aconteceu sem evento no Calendar:</div>
+        <button class="btn-ghost" style="font-size:12px;padding:7px 13px;margin-top:10px;" onclick="markAsRealizado('${taskId}')">✅ Marcar reunião como realizada e buscar transcrição</button>`;
+    }
+  }
+
+  // ── RESOLUÇÃO VIA E-MAIL ──────────────────────────────────────
+  async function resolveEmailTask(taskId, resultEl) {
+    const cached = JSON.parse(localStorage.getItem(EMAIL_RESOLUTION_KEY) || '{}');
+    if (cached[taskId]) {
+      resultEl.innerHTML = _renderEmailResolution(cached[taskId], taskId);
+      return;
+    }
+    resultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Buscando e-mail de encerramento...</div>';
+    try {
+      const b = BRIEFINGS[taskId];
+      const aiTask = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]').find(t => t.id === taskId);
+      const savedSubject = aiTask?.emailSubject || null;
+      const query = savedSubject
+        ? `subject:"${savedSubject}" newer_than:60d`
+        : b?.emailSearch
+        || `newer_than:30d ${(b?.keywords || []).join(' ') || b?.driveSearch || b?.title || taskId.replace(/-/g,' ')}`;
+      const res = await window.cowork.callMcpTool(
+        'mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__search_threads',
+        { query, pageSize: 6 }
+      );
+      let list = res?.threads || [];
+      if (!list.length && res?.content) {
+        try { const t = res.content.find(c=>c.type==='text')?.text; if(t) list = JSON.parse(t).threads || []; } catch(e){}
+      }
+      if (!list.length) {
+        resultEl.innerHTML = `<div style="font-size:12px;color:var(--gray-500);">Nenhum e-mail relacionado encontrado.</div>`;
+        return;
+      }
+      const summaryParts = await Promise.all(list.slice(0, 4).map(async t => {
+        try {
+          const full = await window.cowork.callMcpTool(
+            'mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__get_thread',
+            { threadId: t.id || t.threadId }
+          );
+          const msgs = full?.messages || t.messages || [];
+          return msgs.map(m => `De: ${m.sender||'?'} | ${m.subject||'?'}\n${(m.body||m.snippet||'').substring(0,400)}`).join('\n');
+        } catch(_) {
+          const msg = (t.messages||[]).slice(-1)[0] || {};
+          return `De: ${msg.sender||'?'} | ${msg.subject||'?'}\n${msg.snippet||''}`;
+        }
+      }));
+      const summary = summaryParts.join('\n\n---\n\n');
+      const basePrompt = b?.emailResolvePrompt
+        || `A task "${b?.title || taskId}" foi marcada como concluída pelo Diego. Analise os e-mails abaixo e explique em 3-4 linhas: o que foi comunicado, o que foi resolvido, e se ainda há algo pendente.`;
+      const raw = await window.cowork.askClaude(`${basePrompt}\n\nE-MAILS:\n${summary}`, []);
+      const text = extractText(raw);
+      const resolution = { text, timestamp: Date.now() };
+      cached[taskId] = resolution;
+      localStorage.setItem(EMAIL_RESOLUTION_KEY, JSON.stringify(cached));
+      resultEl.innerHTML = _renderEmailResolution(resolution, taskId);
+    } catch(e) {
+      resultEl.innerHTML = `<div style="font-size:12px;color:var(--red);">⚠️ ${e.message || String(e)}</div>`;
+    }
+  }
+
+  function _renderEmailResolution(r, taskId) {
+    const dt = r.timestamp ? new Date(r.timestamp).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    const refreshBtn = taskId ? `<button onclick="clearEmailResolution('${taskId}')" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--magenta);margin-left:8px;padding:0;">↻ rebuscar</button>` : '';
+    return `
+      <div style="font-size:12px;color:var(--gray-700);line-height:1.7;white-space:pre-wrap;">${r.text}</div>
+      <div style="font-size:10px;color:var(--gray-400);margin-top:8px;">📧 Contexto extraído dos e-mails relacionados${dt ? ' · ' + dt : ''}${refreshBtn}</div>`;
+  }
+
+  function clearEmailResolution(taskId) {
+    const cached = JSON.parse(localStorage.getItem(EMAIL_RESOLUTION_KEY) || '{}');
+    delete cached[taskId];
+    localStorage.setItem(EMAIL_RESOLUTION_KEY, JSON.stringify(cached));
+    const resultEl = document.getElementById('transcript-result-' + taskId);
+    if (resultEl) resolveEmailTask(taskId, resultEl);
+  }
+
+  // ── RESOLUÇÃO MANUAL (task concluída sem reunião/e-mail) ───────
+  function resolveManualTask(taskId, resultEl) {
+    const NOTE_KEY = 'amfi-manual-notes-v1';
+    const notes = JSON.parse(localStorage.getItem(NOTE_KEY) || '{}');
+    if (notes[taskId]) {
+      resultEl.innerHTML = _renderManualNote(taskId, notes[taskId]);
+      return;
+    }
+    resultEl.innerHTML = `
+      <div style="font-size:12px;color:var(--gray-500);line-height:1.6;margin-bottom:10px;">Task concluída manualmente. Quer registrar como foi encerrada?</div>
+      <textarea id="manualNote-${taskId}" placeholder="Ex: enviei o e-mail, ligamos por telefone, foi resolvido na reunião de sexta..."
+        style="width:100%;min-height:70px;font-size:12px;padding:8px;border:1px solid var(--gray-300);border-radius:6px;resize:vertical;font-family:Montserrat,sans-serif;color:var(--gray-700);"></textarea>
+      <button onclick="saveManualNote('${taskId}')" style="margin-top:8px;font-size:12px;padding:6px 14px;background:var(--magenta);color:#fff;border:none;border-radius:6px;cursor:pointer;">Salvar</button>`;
+  }
+
+  function saveManualNote(taskId) {
+    const NOTE_KEY = 'amfi-manual-notes-v1';
+    const val = document.getElementById('manualNote-' + taskId)?.value?.trim();
+    if (!val) return;
+    const notes = JSON.parse(localStorage.getItem(NOTE_KEY) || '{}');
+    notes[taskId] = { text: val, timestamp: Date.now() };
+    localStorage.setItem(NOTE_KEY, JSON.stringify(notes));
+    const resultEl = document.getElementById('transcript-result-' + taskId);
+    if (resultEl) resultEl.innerHTML = _renderManualNote(taskId, notes[taskId]);
+  }
+
+  function _renderManualNote(taskId, n) {
+    const dt = n.timestamp ? new Date(n.timestamp).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    return `
+      <div style="font-size:12px;color:var(--gray-700);line-height:1.7;">${n.text}</div>
+      <div style="font-size:10px;color:var(--gray-400);margin-top:8px;">📝 Nota registrada${dt ? ' em ' + dt : ''}</div>`;
+  }
+
+  function clearAndReanalyze(taskId) {
+    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+    delete cache[taskId];
+    localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
+    const resultEl = document.getElementById('transcript-result-' + taskId);
+    if (resultEl) resultEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-500);"><span class="spinner"></span> Reanalisando...</div>';
+    const badge = document.getElementById('cal-' + taskId);
+    analyzeAndCache(taskId, badge?.getAttribute('data-event-key') || taskId);
+  }
+
+  // ── AI-GENERATED TASKS ────────────────────────────────────────
+  function normalizeAcao(str) {
+    return (str || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 80);
+  }
+
+  function isSimilarAcao(a, b) {
+    const na = normalizeAcao(a), nb = normalizeAcao(b);
+    if (!na || !nb) return false;
+    return na === nb || na.includes(nb.substring(0, 50)) || nb.includes(na.substring(0, 50));
+  }
+
+  function getExistingTasksContext() {
+    const aiTasks = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]').filter(t => !t.done);
+    const hardcoded = [...document.querySelectorAll('.card[id]')].map(c => {
+      const name = c.querySelector('.card-name')?.textContent?.replace('📋','').trim();
+      return name || null;
+    }).filter(Boolean);
+    const all = [...hardcoded, ...aiTasks.map(t => t.acao)];
+    if (!all.length) return '';
+    return '\n\nTASKS JÁ CADASTRADAS — não gere tasks semelhantes ou duplicadas a estas:\n' +
+      all.map(t => `- ${t}`).join('\n') +
+      '\n\nSó extraia tasks GENUINAMENTE NOVAS que não estejam cobertas pelas acima.\n';
+  }
+
+  function createAITasks(sourceTaskId, sourceTitle, proximos_passos) {
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    const existing = stored.filter(t => t.sourceTaskId === sourceTaskId);
+    const other = stored.filter(t => t.sourceTaskId !== sourceTaskId);
+
+    function findMatch(acao) {
+      return existing.find(t => isSimilarAcao(t.acao, acao)) || null;
+    }
+
+    const matchedExistingIds = new Set();
+    const newTasks = proximos_passos.map((p, i) => {
+      const match = findMatch(p.acao);
+      if (match) matchedExistingIds.add(match.id);
+      return {
+        id: match ? match.id : `ai-${sourceTaskId}-${Date.now()}-${i}`,
+        sourceTaskId, sourceTitle,
+        dono: p.dono, acao: p.acao, prazo: p.prazo,
+        origem: p.origem || (match?.origem) || null,
+        emailSubject: p.emailSubject || match?.emailSubject || null,
+        created: match ? match.created : Date.now(),
+        done: match ? match.done : false
+      };
+    });
+
+    const keptOld = existing.filter(t => !matchedExistingIds.has(t.id));
+    localStorage.setItem(AI_TASKS_KEY, JSON.stringify([...other, ...keptOld, ...newTasks]));
+    renderAITasks();
+    updateStats();
+  }
+
+  function toggleAITask(id) {
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    const t = stored.find(t => t.id === id);
+    if (t) t.done = !t.done;
+    localStorage.setItem(AI_TASKS_KEY, JSON.stringify(stored));
+    renderAITasks();
+    updateStats();
+  }
+
+  function dismissAITask(id) {
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    localStorage.setItem(AI_TASKS_KEY, JSON.stringify(stored.filter(t => t.id !== id)));
+    renderAITasks();
+    updateStats();
+  }
+
+  function renderAITasks() {
+    document.querySelectorAll('[data-ai-task="true"]').forEach(el => el.remove());
+    const stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    if (!stored.length) { updateStats(countDone()); return; }
+
+    const getListId = (prazo) => {
+      if (!prazo) return 'list-semana';
+      const p = prazo.toLowerCase();
+      if (p.includes('hoje')) return 'list-urgente';
+      if (p.includes('semana')) return 'list-semana';
+      return 'list-proximas';
+    };
+
+    stored.forEach(t => {
+      const listEl = document.getElementById(getListId(t.prazo));
+      if (!listEl) return;
+      const card = document.createElement('div');
+      card.className = 'card blue' + (t.done ? ' done' : '');
+      card.id = t.id;
+      card.setAttribute('data-ai-task', 'true');
+      card.style.position = 'relative';
+      const origemBadge = t.origem === 'amfi'
+        ? `<span class="badge" style="font-size:9px;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;">🏢 AmFi</span>`
+        : t.origem === 'externa'
+        ? `<span class="badge" style="font-size:9px;background:#fff3e0;color:#e65100;border:1px solid #ffcc80;">🌐 Externa</span>`
+        : '';
+      card.innerHTML = `
+        <div class="check-wrap"><div class="check-box ${t.done?'checked':''}" onclick="toggleAITask('${t.id}')"></div></div>
+        <div class="card-content">
+          <div class="card-name" onclick="openBriefing('${t.id}')" title="Clique para ver o briefing">${t.acao} <span style="font-size:11px;opacity:0.45;">📋</span></div>
+          <div class="card-desc" style="font-size:11px;color:var(--gray-500);">🤖 Gerado pela IA · De: ${t.sourceTitle}</div>
+          <div class="card-meta">
+            <span class="badge b-magenta" style="font-size:9px;">🤖 IA</span>
+            ${origemBadge}
+            <span class="badge b-gray">${t.prazo || 'esta semana'}</span>
+          </div>
+        </div>
+        <button onclick="dismissAITask('${t.id}')" title="Dispensar" style="position:absolute;top:8px;right:8px;background:none;border:none;cursor:pointer;font-size:14px;color:var(--gray-500);line-height:1;opacity:0.5;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.5">✕</button>`;
+      listEl.appendChild(card);
+    });
+
+    updateStats(countDone());
+  }
+
+  function countDone() {
+    let n = 0;
+    document.querySelectorAll('.card[id]').forEach(card => {
+      if (loadDone()[card.id] || card.querySelector('.check-box.checked')) n++;
+    });
+    return n;
+  }
+
+  function closeBriefing() {
+    document.getElementById('drawerOverlay').classList.remove('open');
+    document.getElementById('briefingDrawer').classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  document.querySelectorAll('.card[id]').forEach(card => {
+    const nameEl = card.querySelector('.card-name');
+    if (nameEl && BRIEFINGS[card.id]) {
+      nameEl.addEventListener('click', () => openBriefing(card.id));
+      nameEl.title = 'Clique para ver o briefing detalhado';
+      const icon = document.createElement('span');
+      icon.textContent = ' 📋';
+      icon.style.cssText = 'font-size:11px;opacity:0.45;';
+      nameEl.appendChild(icon);
+    }
+  });
+
+  // ── INIT ──────────────────────────────────────────────────────
+  if (!localStorage.getItem('amfi-tasks-cleared-v1')) {
+    localStorage.removeItem(AI_TASKS_KEY);
+    localStorage.setItem('amfi-tasks-cleared-v1', '1');
+  }
+
+  applyState(loadDone());
+
+  (function seedManualRubia() {
+    const stored = JSON.parse(localStorage.getItem(MANUAL_REALIZADO_KEY) || '{}');
+    if (!stored['task-rubia']) {
+      stored['task-rubia'] = { dateStr: 'sex., 22/05 11:00', eventKey: 'manual-rubia-20260522' };
+      localStorage.setItem(MANUAL_REALIZADO_KEY, JSON.stringify(stored));
+    }
+  })();
+
+  (function cleanAndDedupeAITasks() {
+    const emailTaskIds = [...document.querySelectorAll('[data-tipo="email"]')].map(el => el.id);
+    let stored = JSON.parse(localStorage.getItem(AI_TASKS_KEY) || '[]');
+    stored = stored.filter(t => !emailTaskIds.includes(t.sourceTaskId));
+    const grouped = {};
+    stored.forEach(t => {
+      if (!grouped[t.sourceTaskId]) grouped[t.sourceTaskId] = [];
+      grouped[t.sourceTaskId].push(t);
+    });
+    const deduped = [];
+    Object.values(grouped).forEach(group => {
+      const seen = [];
+      group.forEach(t => {
+        const isDup = seen.some(s => isSimilarAcao(s.acao, t.acao));
+        if (!isDup) { seen.push(t); deduped.push(t); }
+      });
+    });
+    localStorage.setItem(AI_TASKS_KEY, JSON.stringify(deduped));
+  })();
+
+  (function sanitizeTranscriptCache() {
+    const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+    let changed = false;
+    Object.keys(cache).forEach(k => {
+      const a = cache[k]?.analysis;
+      if (a && a.raw && typeof a.raw !== 'string') { delete cache[k]; changed = true; }
+      if (a && !a.raw && !a.resumo) { delete cache[k]; changed = true; }
+    });
+    if (changed) localStorage.setItem(TRANSCRIPT_CACHE_KEY, JSON.stringify(cache));
+  })();
+
+  renderAITasks();
+  applyManualRealizado();
+
+  function waitForCowork(attempts, cb) {
+    if (attempts <= 0) { cb(false); return; }
+    if (window.cowork && typeof window.cowork.callMcpTool === 'function') { cb(true); }
+    else { setTimeout(() => waitForCowork(attempts - 1, cb), 400); }
+  }
+
+  waitForCowork(25, (ready) => {
+    if (ready) {
+      loadCalendarStatus();
+      checkDrive();
+    } else {
+      document.getElementById('calStatusBar').className = 'cal-status-bar';
+      document.getElementById('calStatusBar').textContent = 'Clique em "Verificar Drive" para atualizar.';
+      document.querySelectorAll('.cal-badge').forEach(el => el.style.display = 'none');
+      document.getElementById('lastUpdate').textContent = 'Pronto — clique em Fazer Varredura para atualizar.';
+      applyManualRealizado();
+      document.querySelectorAll('.cal-badge.done-cal').forEach(badge => {
+        const taskId = badge.id.replace('cal-', '');
+        const cache = JSON.parse(localStorage.getItem(TRANSCRIPT_CACHE_KEY) || '{}');
+        if (!cache[taskId]) analyzeAndCache(taskId, badge.getAttribute('data-event-key') || taskId);
+      });
+    }
+  });
+</script>
+</body>
+</html>
