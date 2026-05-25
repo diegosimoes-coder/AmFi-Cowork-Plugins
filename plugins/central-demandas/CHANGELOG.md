@@ -1,5 +1,11 @@
 # Changelog — Central de Demandas
 
+## v1.7.0 (2026-05-24)
+- **Fix Drive search para atas com `/` no assunto** — caracteres especiais como `/` (ex: "PLD/FT") eram enviados crus ao Drive API e quebravam a query; agora são removidos antes da busca
+- **Keywords filtragem no Drive** — resultados do Drive filtrados por título relevante, evitando puxar docs genéricos (ex: Manual de Compliance em vez da ata específica)
+- **Notion fallback para atas** — quando Drive não encontra a ata específica, busca automaticamente nas bases **Decisões** e **Reuniões - Otallin** do Notion e inclui o conteúdo encontrado no contexto da análise de e-mail
+- **`modifiedTime` filter no Drive** — busca de ata limita a arquivos criados após 2026-05-01, evitando docs antigos
+
 ## v1.6.0 (2026-05-24)
 - **Anti-duplicata** — tasks existentes injetadas no prompt dos 3 scanners (Drive/Email/Notion) para a IA não gerar tasks já cadastradas
 - **Merge por similaridade** — `createAITasks` usa comparação fuzzy em vez de igualdade exata para reconhecer tasks reformuladas

@@ -762,18 +762,148 @@
       list.forEach(t => threads.push(t));
 
       if (threads.length > 0) {
-        // Inclui [ASSUNTO:...] em cada entrada para rastrear de qual e-mail veio cada ação
-        const emailSummary = threads.map(t => {
+        // Identifica threads que merecem leitura completa (liderança + atas/comitês)
+        const VIP_SENDERS = ['paulo.david', 'paulo david', 'pirola', 'stallin', 'ceo', 'diretor'];
+        const VIP_SUBJECTS = ['anotações:', 'ata:', 'comitê', 'committee', 'minutes:', 'reunião', 'diretoria'];
+        function isVIP(msg) {
+          const sender = (msg.sender || '').toLowerCase();
+          const subject = (msg.subject || '').toLowerCase();
+          return VIP_SENDERS.some(v => sender.includes(v)) || VIP_SUBJECTS.some(v => subject.includes(v));
+        }
+
+        body.innerHTML = '<span class="spinner"></span> Lendo e-mails... (leitura completa de e-mails importantes)';
+
+        // 1ª passagem: snippet de todos; 2ª passagem: corpo completo dos VIPs
+        const emailSummary = (await Promise.all(threads.map(async t => {
           const msg = (t.messages || []).slice(-1)[0] || {};
           const senderStr = msg.sender || '?';
           const isAmFi = senderStr.toLowerCase().includes('@amfi.finance');
           const domainTag = isAmFi ? '[AmFi]' : '[Externa]';
           const subject = msg.subject || '?';
-          return `${domainTag}[ASSUNTO: ${subject}] De: ${senderStr} | Data: ${msg.date ? new Date(msg.date).toLocaleString('pt-BR') : '?'}\n${msg.snippet||''}`;
-        }).join('\n\n---\n\n');
+          let body_text = msg.snippet || '';
+
+          // Lê corpo completo apenas para e-mails VIP
+          if (isVIP(msg)) {
+            try {
+              const full = await window.cowork.callMcpTool(
+                'mcp__d23f0649-5eee-4b3b-a152-392ca729a0f1__get_thread',
+                { threadId: t.id || t.threadId }
+              );
+              const msgs = full?.messages || [];
+              const parts = msgs.map(m => {
+                const from = m.sender || m.from || '?';
+                // Tenta todos os campos possíveis onde o corpo pode estar
+                const bodyText =
+                  m.body ||
+                  m.bodyText ||
+                  m.textBody ||
+                  m.text ||
+                  m.content ||
+                  m.bodyHtml?.replace(/<[^>]+>/g, ' ') ||
+                  (Array.isArray(m.parts) ? m.parts.map(p =>
+                    p.body?.data || p.body || p.text || p.content || ''
+                  ).join('\n') : '') ||
+                  m.snippet || '';
+                // Lista anexos se existirem
+                const attachments = (m.attachments || m.files || [])
+                  .map(a => `[Anexo: ${a.filename || a.name || 'arquivo'}]`).join(', ');
+                const display = (bodyText.substring(0, 2000) + (attachments ? '\n' + attachments : '')).trim();
+                if (!display) console.log('[VIP email debug] campos disponíveis:', Object.keys(m).join(', '));
+                return `[${from}]: ${display || ''}`;
+              }).join('\n\n').trim();
+
+              // Usa o corpo do e-mail se disponível
+              if (parts) body_text = parts;
+
+              // Para atas/comitês: SEMPRE busca no Drive + Notion (corpo pode estar truncado)
+              const isAta = VIP_SUBJECTS.some(v => (msg.subject||'').toLowerCase().includes(v));
+              if (isAta) {
+                try {
+                  // Limpa assunto: remove prefixos comuns e caracteres especiais
+                  const cleanSubject = (msg.subject || '')
+                    .replace(/^Anotações:\s*/i, '')
+                    .replace(/["""«»\/]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                  // Extrai keywords significativas (>3 chars) para Drive query
+                  const driveKws = cleanSubject
+                    .split(/\s+/)
+                    .filter(w => w.length > 3)
+                    .map(w => w.replace(/[^a-zA-ZÀ-ú0-9]/g, ''))
+                    .filter(Boolean)
+                    .slice(0, 3);
+                  const driveQ = driveKws.length >= 2
+                    ? `(title contains '${driveKws[0]}' or fullText contains '${driveKws[0]}') and modifiedTime > '2026-05-01T00:00:00Z'`
+                    : `fullText contains '${driveKws[0] || cleanSubject.substring(0, 30)}' and modifiedTime > '2026-05-01T00:00:00Z'`;
+
+                  const driveSearch = await window.cowork.callMcpTool(
+                    'mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__search_files',
+                    { query: driveQ, pageSize: 5 }
+                  );
+                  // Filtra por título relevante para evitar docs genéricos
+                  const driveFiles = (driveSearch?.files || []).filter(f => {
+                    const t = (f.title || f.name || '').toLowerCase();
+                    return driveKws.some(kw => t.includes(kw.toLowerCase()));
+                  });
+                  if (driveFiles.length > 0) {
+                    const fileContent = await window.cowork.callMcpTool(
+                      'mcp__bcb42dce-c7a0-48b7-8882-bb75b9c52fe9__read_file_content',
+                      { fileId: driveFiles[0].id }
+                    );
+                    const driveText = fileContent?.content || fileContent?.text ||
+                      (Array.isArray(fileContent?.content) ? fileContent.content.map(c=>c.text||'').join('\n') : '') || '';
+                    if (driveText.length > 50) {
+                      body_text = (body_text ? body_text + '\n\n' : '') +
+                        `[=== ATA NO DRIVE: ${driveFiles[0].title || cleanSubject} ===]\n${driveText.substring(0, 3000)}`;
+                    }
+                  }
+
+                  // Notion fallback 1: busca na base de Decisões
+                  try {
+                    const notionDecisoes = await window.cowork.callMcpTool(
+                      'mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-search',
+                      { query: cleanSubject, data_source_url: 'collection://366061f2-b2ad-8071-b7c2-000b4f7e9a3b', page_size: 3, max_highlight_length: 300 }
+                    );
+                    const decisoes = notionDecisoes?.results || [];
+                    if (decisoes.length > 0) {
+                      const decisoesText = decisoes.map(d => `• ${d.title}: ${d.highlight || ''}`).join('\n');
+                      body_text = (body_text ? body_text + '\n\n' : '') +
+                        `[=== DECISÕES NO NOTION ===]\n${decisoesText}`;
+                    }
+                  } catch(_) { /* segue */ }
+
+                  // Notion fallback 2: busca nas Reuniões - Otallin
+                  try {
+                    const notionReunioes = await window.cowork.callMcpTool(
+                      'mcp__244068a2-da3f-4de5-8929-8f75bfdc3d21__notion-search',
+                      { query: cleanSubject, data_source_url: 'collection://361061f2-b2ad-80a2-9d82-000b44dcd74a', page_size: 3, max_highlight_length: 300 }
+                    );
+                    const reunioes = notionReunioes?.results || [];
+                    if (reunioes.length > 0) {
+                      const reunioesText = reunioes.map(r => `• ${r.title}: ${r.highlight || ''}`).join('\n');
+                      body_text = (body_text ? body_text + '\n\n' : '') +
+                        `[=== REUNIÕES NO NOTION ===]\n${reunioesText}`;
+                    }
+                  } catch(_) { /* segue */ }
+
+                } catch(_) { /* segue com o que tiver */ }
+              }
+            } catch(_) { /* mantém snippet */ }
+          }
+
+          return `${domainTag}[ASSUNTO: ${subject}] De: ${senderStr} | Data: ${msg.date ? new Date(msg.date).toLocaleString('pt-BR') : '?'}\n${body_text}`;
+        }))).join('\n\n---\n\n');
 
         emailResult = await window.cowork.askClaude(
-          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia APENAS as ações que o Diego precisa tomar. Cada e-mail tem tags [AmFi] ou [Externa] e [ASSUNTO: ...]. Para cada ação use o formato: → [AmFi][ASSUNTO: assunto original] ação concreta  ou  → [Externa][ASSUNTO: assunto original] ação concreta. Preserve SEMPRE o [ASSUNTO: ...] exatamente como aparece no e-mail de origem. Ignore informativos sem ação. Se não houver ações, diga "Nenhuma ação pendente."` +
+          `Você é o assistente do Diego Simoes, DRI de AI na AmFi Finance. Analise estes e-mails e extraia as ações que o Diego precisa tomar.
+
+REGRA CRÍTICA: E-mails de pessoas da liderança (Paulo David, CEO, diretoria, sócios da AmFi) e e-mails com assuntos como "Anotações:", "Ata:", "Comitê", "Minutes:" devem ser analisados com atenção redobrada. Para e-mails que contenham transcrições, atas ou anotações de reunião, SEMPRE leia o conteúdo completo e extraia os pontos-chave discutidos.
+
+FORMATO DE SAÍDA:
+- Para e-mails simples com ação clara: → [AmFi][ASSUNTO: assunto] ação concreta
+- Para e-mails com transcrição/ata/anotações (lidos na íntegra): → [AmFi][ASSUNTO: assunto] ação concreta | PONTOS: ponto 1; ponto 2; ponto 3 (máx 4 pontos-chave da transcrição, separados por ;)
+
+Preserve SEMPRE o [ASSUNTO: ...] exatamente como aparece. Se não houver nada acionável, diga "Nenhuma ação pendente."` +
           getExistingTasksContext() + `\n\nE-MAILS:\n${emailSummary}`, []
         );
 
@@ -791,7 +921,11 @@
             // Extrai assunto
             const subjectMatch = raw.match(/^\[ASSUNTO:\s*([^\]]*)\]/);
             if (subjectMatch) { emailSubject = subjectMatch[1].trim(); raw = raw.replace(/^\[ASSUNTO:[^\]]*\]\s*/, '').trim(); }
-            return { dono: 'Diego', acao: raw, prazo: 'esta semana', origem, emailSubject };
+            // Extrai pontos-chave da transcrição (após " | PONTOS:")
+            let descricao = null;
+            const pontosMatch = raw.match(/\|\s*PONTOS:\s*(.+)$/i);
+            if (pontosMatch) { descricao = pontosMatch[1].trim(); raw = raw.replace(/\|\s*PONTOS:.+$/i, '').trim(); }
+            return { dono: 'Diego', acao: raw, prazo: 'esta semana', origem, emailSubject, descricao };
           });
           createAITasks('email-scan', 'Varredura de E-mail', emailTasks);
         }
@@ -827,16 +961,20 @@
         }))).join('\n\n---\n\n');
 
         notionResult = await window.cowork.askClaude(
-          `Você é o assistente do Diego Simoes. Analise estas anotações do Notion (Reuniões - Otallin) e extraia APENAS ações concretas pendentes para o Diego. Cada ação deve começar com →. Se não houver nada acionável, diga "Nenhuma nova demanda no Notion."` +
+          `Você é o assistente do Diego Simoes. Analise estas anotações do Notion (Reuniões - Otallin) e extraia APENAS ações concretas pendentes para o Diego. Cada página está entre colchetes [Nome da Página]. Para cada ação use o formato: → [PÁGINA: Nome da Página] ação concreta — preservando o nome exato da página de origem. Se não houver nada acionável, diga "Nenhuma nova demanda no Notion."` +
           getExistingTasksContext() + `\n\nNOTION:\n${notionContent}`, []
         );
 
         const notionText = extractText(notionResult);
         const notionActionLines = notionText.split('\n').filter(l => l.trim().startsWith('→'));
         if (notionActionLines.length > 0) {
-          const notionTasks = notionActionLines.map(l => ({
-            dono: 'Diego', acao: l.replace(/^→\s*/, '').trim(), prazo: 'esta semana', origem: null
-          }));
+          const notionTasks = notionActionLines.map(l => {
+            let raw = l.replace(/^→\s*/, '').trim();
+            let pageRef = null;
+            const pageMatch = raw.match(/^\[PÁGINA:\s*([^\]]+)\]/);
+            if (pageMatch) { pageRef = pageMatch[1].trim(); raw = raw.replace(/^\[PÁGINA:[^\]]*\]\s*/, '').trim(); }
+            return { dono: 'Diego', acao: raw, prazo: 'esta semana', origem: null, emailSubject: pageRef };
+          });
           createAITasks('notion-scan', 'Varredura do Notion', notionTasks);
         }
       } else {
@@ -1373,7 +1511,6 @@
           if (driveContent.length >= 50) sources.push('Drive: ' + (file.title || file.name));
         } catch(e) { console.warn('Drive read failed', e); }
       }
-
       // 2b. Busca SEMPRE no Notion "Reuniões - Otallin" (em paralelo, independente do Drive)
       try {
         const notionRes = await window.cowork.callMcpTool(
